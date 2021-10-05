@@ -5,13 +5,14 @@
 #include "device/Ouroboros_impl.cuh"
 #include "device/MemoryInitialization.cuh"
 #include "InstanceDefinitions.cuh"
+#include "PerformanceMeasure.cuh"
 #include "Utility.h"
 #include "cuda.h"
 #include "pmm-utils.cuh"
 
 using namespace std;
 
-#define DEBUG
+//#define DEBUG
 #ifdef DEBUG
 #define debug(a...) printf(a)
 #else
@@ -58,8 +59,7 @@ void mem_manager(volatile int* exit_signal,
                 release_semaphore((int*)lock, request_id);
                 // SEMAPHORE
 
-                debug("mm: request done %d\n", request_id, req_id);
-                //break;
+                debug("mm: request done %d\n", request_id);
             }
         }
     }
@@ -117,7 +117,7 @@ int main(int argc, char *argv[]){
 
     //Ouroboros initialization
     size_t instantitation_size = 7168ULL * 1024ULL * 1024ULL;
-    using MemoryMangerType = OuroVACQ;
+    using MemoryMangerType = OuroPQ;
     MemoryMangerType memory_manager;
     memory_manager.initialize(instantitation_size);
 
@@ -135,30 +135,57 @@ int main(int argc, char *argv[]){
     GUARD_CU(cudaMallocManaged(&exit_counter, sizeof(uint32_t)));
     *exit_counter = 0;
 
-    int grid_size = 1;
-    int block_size = 64;
+    cudaDeviceProp deviceProp;
+    cudaGetDeviceProperties(&deviceProp, 0);
+    int max_block_number = deviceProp.multiProcessorCount;
+    printf("max block number %d\n", max_block_number);
 
     int ouroboros_on = 1;
     if (argc > 1){
         ouroboros_on = atoi(argv[1]);
     }
 
+    /*int grid_size = 1;
+    int block_size = 64;
+
     if (argc == 4){
         debug("args: %s %s\n", argv[2], argv[3]);
         grid_size = atoi(argv[2]);
         block_size = atoi(argv[3]);
+    }*/
+
+    int block_size = 1024;
+    int mm_grid_size = 2;
+    if (argc > 2){
+        mm_grid_size = atoi(argv[2]);
     }
+    int app_grid_size = max_block_number - mm_grid_size; 
    
-    int requests_num{grid_size*block_size};
+    int requests_num{app_grid_size*block_size};
     std::cout << "Number of Allocations: " << requests_num << "\n";
+    std::cout << "APP: " << app_grid_size << ", " << block_size << "\n";
+    std::cout << "MM:  " << mm_grid_size << ", " << block_size << "\n";
+
+    if (ouroboros_on)
+        std::cout << "ouroboros is on\n";
+    else
+        std::cout << "ouroboros is off\n";
 
     //Request auxiliary
     RequestType requests;
     requests.init(requests_num);
     requests.memset();
 
+
+    //Timing variables
+    PerfMeasure timing_app, timing_mm, timing_total;
+
+
+    printf("mm starts\n");
+    timing_mm.startMeasurement();
     //Run presistent kernel (Memory Manager)
-    mem_manager<<<grid_size, block_size, 0, mm_stream>>>(exit_signal,
+    //mem_manager<<<grid_size, block_size, 0, mm_stream>>>(exit_signal,
+    mem_manager<<<mm_grid_size, block_size, 0, mm_stream>>>(exit_signal,
             requests.requests_number, 
             requests.request_iter, 
             requests.request_signal, 
@@ -168,11 +195,16 @@ int main(int argc, char *argv[]){
             requests.request_mem_size,
             requests.lock, 
             ouroboros_on);
+    timing_mm.stopMeasurement();
 
     GUARD_CU(cudaPeekAtLastError());
+    printf("mm stop\n");
 
+    printf("app start\n");
+    timing_app.startMeasurement();
     //Run application
-    app<<<grid_size, block_size, 0, app_stream>>>(exit_signal, 
+    //app<<<grid_size, block_size, 0, app_stream>>>(exit_signal, 
+    app<<<app_grid_size, block_size, 0, app_stream>>>(exit_signal, 
             requests.d_memory, 
             requests.request_signal, 
             requests.request_mem_size, 
@@ -180,27 +212,33 @@ int main(int argc, char *argv[]){
             exit_counter, 
             requests.lock, 
             ouroboros_on);
+    timing_app.stopMeasurement();
 
     GUARD_CU(cudaPeekAtLastError());
+    printf("app stop\n");
     
     // Check results
-    int old_counter = 0;
+    int old_counter = -1;
+    int iter = 0;
     while (1){
-        if (exit_counter[0] == block_size*grid_size){
+        if (exit_counter[0] == block_size*app_grid_size){
             *exit_signal = 1;
             GUARD_CU(cudaDeviceSynchronize());
             GUARD_CU(cudaPeekAtLastError());
             if (ouroboros_on){
-                test1<<<grid_size, block_size, 0, app_stream>>>(requests.d_memory);
+                test1<<<app_grid_size, block_size, 0, app_stream>>>(requests.d_memory);
                 GUARD_CU(cudaDeviceSynchronize());
                 GUARD_CU(cudaPeekAtLastError());
-                mem_test((int**)requests.d_memory, requests_num, grid_size, block_size, mm_stream);
+                mem_test((int**)requests.d_memory, requests_num, app_grid_size, block_size, mm_stream);
             }
             break;
         }else{
             if (exit_counter[0] != old_counter){
                 old_counter = exit_counter[0];
-                debug("no break, exit_counter = %d\n", exit_counter[0]);
+                if (iter%1000 == 0)
+                //debug("no break, exit_counter = %d\n", exit_counter[0]);
+                    printf("no break, exit_counter = %d\n", exit_counter[0]);
+                ++iter;
             }
         }
     }
