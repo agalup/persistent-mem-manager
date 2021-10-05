@@ -25,6 +25,7 @@ struct RequestType{
     volatile int* request_id; 
     volatile int* request_mem_size;
     volatile int* lock;
+    volatile int** d_memory{nullptr};
     int size;
 
     void init(size_t Size);
@@ -46,6 +47,9 @@ void RequestType::init(size_t Size){
     GUARD_CU(cudaMallocManaged(&request_mem_size, size * sizeof(volatile int)));
 
     GUARD_CU(cudaMallocManaged(&lock,             size * sizeof(volatile int)));
+
+    GUARD_CU(cudaMalloc(&d_memory,                size * sizeof(volatile int*)));
+
 
     GUARD_CU(cudaDeviceSynchronize());
     GUARD_CU(cudaPeekAtLastError());
