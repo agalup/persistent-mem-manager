@@ -159,20 +159,31 @@ int main(int argc, char *argv[]){
 
     //Run presistent kernel (Memory Manager)
     mem_manager<<<grid_size, block_size, 0, mm_stream>>>(exit_signal,
-    requests.requests_number, 
-    requests.request_iter, 
-    requests.request_signal, 
-    requests.request_id,
-    memory_manager.getDeviceMemoryManager(),
-    requests.d_memory,
-    requests.request_mem_size,
-    requests.lock, 
-    ouroboros_on);
+            requests.requests_number, 
+            requests.request_iter, 
+            requests.request_signal, 
+            requests.request_id,
+            memory_manager.getDeviceMemoryManager(),
+            requests.d_memory,
+            requests.request_mem_size,
+            requests.lock, 
+            ouroboros_on);
 
-    //GUARD_CU(cudaStreamSynchronize( mm_stream));
     GUARD_CU(cudaPeekAtLastError());
 
-    int isRunning = 0;
+    //Run application
+    app<<<grid_size, block_size, 0, app_stream>>>(exit_signal, 
+            requests.d_memory, 
+            requests.request_signal, 
+            requests.request_mem_size, 
+            requests.request_id, 
+            exit_counter, 
+            requests.lock, 
+            ouroboros_on);
+
+    GUARD_CU(cudaPeekAtLastError());
+    
+    // Check results
     int old_counter = 0;
     while (1){
         if (exit_counter[0] == block_size*grid_size){
@@ -192,24 +203,11 @@ int main(int argc, char *argv[]){
                 debug("no break, exit_counter = %d\n", exit_counter[0]);
             }
         }
-        if (!isRunning){
-            //Run application
-            app<<<grid_size, block_size, 0, app_stream>>>(exit_signal, 
-            requests.d_memory, 
-            requests.request_signal, 
-            requests.request_mem_size, 
-            requests.request_id, 
-            exit_counter, 
-            requests.lock, 
-            ouroboros_on);
-
-            GUARD_CU(cudaPeekAtLastError());
-            isRunning = 1;
-        }
     }
 
     GUARD_CU(cudaStreamSynchronize(mm_stream));
     GUARD_CU(cudaStreamSynchronize(app_stream));
+    GUARD_CU(cudaPeekAtLastError());
     printf("DONE!\n");
     return 0;
 }
