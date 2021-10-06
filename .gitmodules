@@ -4,3 +4,6 @@
 [submodule "Ouroboros_origin"]
 	path = Ouroboros_origin
 	url = https://github.com/GPUPeople/Ouroboros.git
+[submodule "halloc"]
+	path = halloc
+	url = https://github.com/canonizer/halloc.git

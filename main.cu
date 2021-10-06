@@ -9,6 +9,7 @@
 #include "Utility.h"
 #include "cuda.h"
 #include "pmm-utils.cuh"
+#include "Instance.cuh"
 
 using namespace std;
 
@@ -28,7 +29,8 @@ void mem_manager(volatile int* exit_signal,
                 volatile int* request_iter,
                 volatile int* request_signal, 
                 volatile int* request_ids, 
-                MemoryManagerType* mm,
+                //MemoryManagerType* mm,
+                MemoryManagerType mm,
                 volatile int** d_memory,
                 volatile int* request_mem_size,
                 volatile int* lock, 
@@ -49,7 +51,8 @@ void mem_manager(volatile int* exit_signal,
 
                 if (ouroboros_on){
                     d_memory[req_id] = reinterpret_cast<volatile int*>
-                        (mm->malloc(request_mem_size[request_id]));
+                        (mm.malloc(request_mem_size[request_id]));
+                        //(mm->malloc(request_mem_size[request_id]));
                     assert(d_memory[req_id]);
                 }
 
@@ -116,10 +119,13 @@ void app(volatile int* exit_signal,
 int main(int argc, char *argv[]){
 
     //Ouroboros initialization
-    size_t instantitation_size = 7168ULL * 1024ULL * 1024ULL;
-    using MemoryMangerType = OuroPQ;
-    MemoryMangerType memory_manager;
-    memory_manager.initialize(instantitation_size);
+    //size_t instantitation_size = 7168ULL * 1024ULL * 1024ULL;
+    size_t instantitation_size = 2048ULL * 1024ULL * 1024ULL;
+    //using MemoryMangerType = OuroPQ;
+    using MemoryManagerType = MemoryManagerHalloc;
+    MemoryManagerType memory_manager(instantitation_size);
+    //MemoryMangerType memory_manager;
+    //memory_manager.initialize(instantitation_size);
 
     //Creat two asynchronous streams which may run concurrently with the default stream 0.
     //The streams are not synchronized with the default stream.
@@ -154,7 +160,8 @@ int main(int argc, char *argv[]){
         block_size = atoi(argv[3]);
     }*/
 
-    int block_size = 1024;
+    //int block_size = 1024;
+    int block_size = 1024;//128;
     int mm_grid_size = 2;
     if (argc > 2){
         mm_grid_size = atoi(argv[2]);
@@ -178,11 +185,11 @@ int main(int argc, char *argv[]){
 
 
     //Timing variables
-    PerfMeasure timing_app, timing_mm, timing_total;
+    //PerfMeasure timing_app, timing_mm, timing_total;
 
 
     printf("mm starts\n");
-    timing_mm.startMeasurement();
+    //timing_mm.startMeasurement();
     //Run presistent kernel (Memory Manager)
     //mem_manager<<<grid_size, block_size, 0, mm_stream>>>(exit_signal,
     mem_manager<<<mm_grid_size, block_size, 0, mm_stream>>>(exit_signal,
@@ -190,18 +197,19 @@ int main(int argc, char *argv[]){
             requests.request_iter, 
             requests.request_signal, 
             requests.request_id,
-            memory_manager.getDeviceMemoryManager(),
+            //memory_manager.getDeviceMemoryManager(),
+            memory_manager,
             requests.d_memory,
             requests.request_mem_size,
             requests.lock, 
             ouroboros_on);
-    timing_mm.stopMeasurement();
+    //timing_mm.stopMeasurement();
 
     GUARD_CU(cudaPeekAtLastError());
     printf("mm stop\n");
 
     printf("app start\n");
-    timing_app.startMeasurement();
+    //timing_app.startMeasurement();
     //Run application
     //app<<<grid_size, block_size, 0, app_stream>>>(exit_signal, 
     app<<<app_grid_size, block_size, 0, app_stream>>>(exit_signal, 
@@ -212,7 +220,7 @@ int main(int argc, char *argv[]){
             exit_counter, 
             requests.lock, 
             ouroboros_on);
-    timing_app.stopMeasurement();
+    //timing_app.stopMeasurement();
 
     GUARD_CU(cudaPeekAtLastError());
     printf("app stop\n");
