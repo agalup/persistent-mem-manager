@@ -1,3 +1,6 @@
 [submodule "Ouroboros"]
 	path = Ouroboros_fork
 	url = git@github.com:agalup/Ouroboros.git
+[submodule "Ouroboros_origin"]
+	path = Ouroboros_origin
+	url = https://github.com/GPUPeople/Ouroboros.git
