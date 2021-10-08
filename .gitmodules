@@ -7,3 +7,6 @@
 [submodule "halloc"]
 	path = halloc
 	url = https://github.com/canonizer/halloc.git
+[submodule "GPUMemManSurvey"]
+	path = GPUMemManSurvey
+	url = https://github.com/GPUPeople/GPUMemManSurvey.git
