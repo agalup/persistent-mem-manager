@@ -30,6 +30,7 @@ struct RequestType{
 
     void init(size_t Size);
     void memset();
+    void free();
 };
 
 void RequestType::init(size_t Size){
@@ -37,19 +38,26 @@ void RequestType::init(size_t Size){
     size = Size;
 
     GUARD_CU(cudaMallocManaged(&requests_number,         sizeof(volatile int)));
-    
     GUARD_CU(cudaMallocManaged(&request_iter,            sizeof(volatile int)));
-
     GUARD_CU(cudaMallocManaged(&request_signal,   size * sizeof(volatile int)));
-    
     GUARD_CU(cudaMallocManaged(&request_id,       size * sizeof(volatile int)));
- 
     GUARD_CU(cudaMallocManaged(&request_mem_size, size * sizeof(volatile int)));
-
     GUARD_CU(cudaMallocManaged(&lock,             size * sizeof(volatile int)));
-
     GUARD_CU(cudaMalloc(&d_memory,                size * sizeof(volatile int*)));
 
+    GUARD_CU(cudaDeviceSynchronize());
+    GUARD_CU(cudaPeekAtLastError());
+}
+
+void RequestType::free(){
+
+    GUARD_CU(cudaFree((void*)requests_number));
+    GUARD_CU(cudaFree((void*)request_iter));
+    GUARD_CU(cudaFree((void*)request_signal));
+    GUARD_CU(cudaFree((void*)request_id));
+    GUARD_CU(cudaFree((void*)request_mem_size));
+    GUARD_CU(cudaFree((void*)lock));
+    GUARD_CU(cudaFree((void*)d_memory));
 
     GUARD_CU(cudaDeviceSynchronize());
     GUARD_CU(cudaPeekAtLastError());
@@ -124,7 +132,9 @@ void mem_free(MemoryManagerType* mm, int** d_memory, int requests_num){
 }
 
 __device__ void acquire_semaphore(int* lock, int i){
-    while (atomicCAS(&lock[i], 0, 1) != 0);
+    while (atomicCAS(&lock[i], 0, 1) != 0){
+        //printf("acq semaphore: thread %d\n", threadIdx.x);
+    }
     __threadfence();
 }
 
