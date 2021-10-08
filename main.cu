@@ -1,6 +1,7 @@
 #include <iostream>
 #include <string>
 #include <cassert>
+#include <algorithm>
 
 #include "device/Ouroboros_impl.cuh"
 #include "device/MemoryInitialization.cuh"
@@ -162,11 +163,14 @@ int main(int argc, char *argv[]){
 
     //int block_size = 1024;
     int block_size = 1024;//128;
+
     int mm_grid_size = 2;
     if (argc > 2){
         mm_grid_size = atoi(argv[2]);
     }
+
     int app_grid_size = max_block_number - mm_grid_size; 
+
    
     int requests_num{app_grid_size*block_size};
     std::cout << "Number of Allocations: " << requests_num << "\n";
@@ -185,13 +189,12 @@ int main(int argc, char *argv[]){
 
 
     //Timing variables
-    //PerfMeasure timing_app, timing_mm, timing_total;
+    PerfMeasure timing_app, timing_mm, timing_total;
 
 
     printf("mm starts\n");
-    //timing_mm.startMeasurement();
+    timing_mm.startMeasurement();
     //Run presistent kernel (Memory Manager)
-    //mem_manager<<<grid_size, block_size, 0, mm_stream>>>(exit_signal,
     mem_manager<<<mm_grid_size, block_size, 0, mm_stream>>>(exit_signal,
             requests.requests_number, 
             requests.request_iter, 
@@ -203,13 +206,13 @@ int main(int argc, char *argv[]){
             requests.request_mem_size,
             requests.lock, 
             ouroboros_on);
-    //timing_mm.stopMeasurement();
+    timing_mm.stopMeasurement();
 
     GUARD_CU(cudaPeekAtLastError());
     printf("mm stop\n");
 
     printf("app start\n");
-    //timing_app.startMeasurement();
+    timing_app.startMeasurement();
     //Run application
     //app<<<grid_size, block_size, 0, app_stream>>>(exit_signal, 
     app<<<app_grid_size, block_size, 0, app_stream>>>(exit_signal, 
