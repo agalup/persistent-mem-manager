@@ -10,7 +10,6 @@
 #include "Utility.h"
 #include "cuda.h"
 #include "pmm-utils.cuh"
-#include "Instance.cuh"
 
 using namespace std;
 
@@ -21,6 +20,12 @@ using namespace std;
 #define debug(a...)
 #endif
 
+#define HALLOC
+//#define OUROBOROS
+
+#ifdef HALLOC
+#include "Instance.cuh"
+#endif
 
 //producer
 template <typename MemoryManagerType>
@@ -30,8 +35,13 @@ void mem_manager(volatile int* exit_signal,
                 volatile int* request_iter,
                 volatile int* request_signal, 
                 volatile int* request_ids, 
-                //MemoryManagerType* mm,
+#ifdef OUROBOROS
+                MemoryManagerType* mm,
+#else
+    #ifdef HALLOC
                 MemoryManagerType mm,
+    #endif
+#endif
                 volatile int** d_memory,
                 volatile int* request_mem_size,
                 volatile int* lock, 
@@ -52,8 +62,13 @@ void mem_manager(volatile int* exit_signal,
 
                 if (ouroboros_on){
                     d_memory[req_id] = reinterpret_cast<volatile int*>
+#ifdef HALLOC
                         (mm.malloc(request_mem_size[request_id]));
-                        //(mm->malloc(request_mem_size[request_id]));
+#else
+#ifdef OUROBOROS
+                        (mm->malloc(request_mem_size[request_id]));
+#endif
+#endif
                     assert(d_memory[req_id]);
                 }
 
@@ -125,16 +140,20 @@ void mem_free(volatile int** d_memory){
 
 int main(int argc, char *argv[]){
 
+#ifdef OUROBOROS
     //Ouroboros initialization
-    //size_t instantitation_size = 7168ULL * 1024ULL * 1024ULL;
-    //using MemoryMangerType = OuroPQ;
-    //MemoryMangerType memory_manager;
-    //memory_manager.initialize(instantitation_size);
-
+    size_t instantitation_size = 7168ULL * 1024ULL * 1024ULL;
+    using MemoryMangerType = OuroPQ;
+    MemoryMangerType memory_manager;
+    memory_manager.initialize(instantitation_size);
+#else
+#ifdef HALLOC
     //Halloc initialization
     size_t instantitation_size = 2048ULL * 1024ULL * 1024ULL;
     using MemoryManagerType = MemoryManagerHalloc;
     MemoryManagerType memory_manager(instantitation_size);
+#endif
+#endif
     
     //Creat two asynchronous streams which may run concurrently with the default stream 0.
     //The streams are not synchronized with the default stream.
@@ -159,28 +178,27 @@ int main(int argc, char *argv[]){
     }
 
     int block_size = 1024;
+    
+    std::cout << "#allocs\t\t" << "#sm app\t\t" << "#sm mm\t\t" << "app launch\t" << "app finished\t" << "app finish sync\n";
 
     for (int mm_grid_size = 1; mm_grid_size < max_block_number; ++mm_grid_size){
 
         *exit_signal = 0;
         *exit_counter = 0;
 
-        int app_grid_size = max_block_number - mm_grid_size;
+        int app_grid_size = (max_block_number) - mm_grid_size;
 
         int requests_num{app_grid_size*block_size};
-        std::cout << "Number of Allocations: " << requests_num << "\n";
-        std::cout << "APP: " << app_grid_size << ", " << block_size << "\n";
-        std::cout << "MM:  " << mm_grid_size << ", " << block_size << "\n";
-
+        
         //Request auxiliary
         RequestType requests;
         requests.init(requests_num);
         requests.memset();
 
         //Timing variables
-        PerfMeasure timing_app, timing_mm, timing_total;
+        PerfMeasure timing_app, timing_mm, timing_total, timing_total_sync;
 
-        printf("mm starts\n");
+//        printf("mm starts\n");
         timing_mm.startMeasurement();
         //Run presistent kernel (Memory Manager)
         mem_manager<<<mm_grid_size, block_size, 0, mm_stream>>>(exit_signal,
@@ -188,8 +206,13 @@ int main(int argc, char *argv[]){
                 requests.request_iter, 
                 requests.request_signal, 
                 requests.request_id,
-                //memory_manager.getDeviceMemoryManager(),
+#ifdef OUROBOROS
+                memory_manager.getDeviceMemoryManager(),
+#else
+#ifdef HALLOC
                 memory_manager,
+#endif
+#endif
                 requests.d_memory,
                 requests.request_mem_size,
                 requests.lock, 
@@ -197,10 +220,12 @@ int main(int argc, char *argv[]){
         timing_mm.stopMeasurement();
 
         GUARD_CU(cudaPeekAtLastError());
-        printf("mm stop\n");
+//        printf("mm stop\n");
 
-        printf("app start\n");
+//        printf("app start\n");
         timing_app.startMeasurement();
+        timing_total.startMeasurement();
+        timing_total_sync.startMeasurement();
         //Run application
         //app<<<grid_size, block_size, 0, app_stream>>>(exit_signal, 
         app<<<app_grid_size, block_size, 0, app_stream>>>(exit_signal, 
@@ -211,19 +236,21 @@ int main(int argc, char *argv[]){
                 exit_counter, 
                 requests.lock, 
                 ouroboros_on);
-        //timing_app.stopMeasurement();
+        timing_app.stopMeasurement();
 
         GUARD_CU(cudaPeekAtLastError());
-        printf("app stop\n");
+//        printf("app stop\n");
 
         // Check results
         int old_counter = -1;
         int iter = 0;
         while (1){
             if (exit_counter[0] == block_size*app_grid_size){
+                timing_total.stopMeasurement();
                 *exit_signal = 1;
                 GUARD_CU(cudaDeviceSynchronize());
                 GUARD_CU(cudaPeekAtLastError());
+                timing_total_sync.stopMeasurement();
                 if (ouroboros_on){
                     test1<<<app_grid_size, block_size, 0, app_stream>>>(requests.d_memory);
                     GUARD_CU(cudaDeviceSynchronize());
@@ -236,7 +263,7 @@ int main(int argc, char *argv[]){
                     old_counter = exit_counter[0];
                     if (iter%1000 == 0)
                         //debug("no break, exit_counter = %d\n", exit_counter[0]);
-                        printf("no break, exit_counter = %d\n", exit_counter[0]);
+                        //printf("no break, exit_counter = %d\n", exit_counter[0]);
                     ++iter;
                 }
             }
@@ -246,6 +273,15 @@ int main(int argc, char *argv[]){
         mem_free<<<app_grid_size, block_size, 0, app_stream>>>(
                 requests.d_memory);
         requests.free();
+
+        // Output
+        auto app_time = timing_app.generateResult();
+        auto total_time = timing_total.generateResult();
+        auto total_sync_time = timing_total_sync.generateResult();
+        //printf("%lf %lf %lf\n", app_time, total_time, total_sync_time);
+        //std::cout << "#allocs\t" << "#sm app\t" << "#sm mm\t" << "app launch time\t" << "app finished time\n";
+        printf("%d\t\t| %d\t\t| %d\t\t| %.2lf\t\t| %.2lf\t\t| %.2lf\n", 
+                requests_num, app_grid_size, mm_grid_size, app_time.mean_, total_time.mean_, total_sync_time.mean_);
     }
 
     GUARD_CU(cudaStreamSynchronize(mm_stream));
