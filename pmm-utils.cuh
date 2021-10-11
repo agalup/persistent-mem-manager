@@ -1,3 +1,4 @@
+
 cudaError_t GRError(cudaError_t error, const char *message,
                     const char *filename, int line, bool print) {
   if (error && print) {
@@ -51,13 +52,22 @@ void RequestType::init(size_t Size){
 
 void RequestType::free(){
 
+    GUARD_CU(cudaPeekAtLastError());
     GUARD_CU(cudaFree((void*)requests_number));
+    GUARD_CU(cudaPeekAtLastError());
     GUARD_CU(cudaFree((void*)request_iter));
+    GUARD_CU(cudaPeekAtLastError());
     GUARD_CU(cudaFree((void*)request_signal));
+    GUARD_CU(cudaPeekAtLastError());
     GUARD_CU(cudaFree((void*)request_id));
+    GUARD_CU(cudaPeekAtLastError());
     GUARD_CU(cudaFree((void*)request_mem_size));
+    GUARD_CU(cudaPeekAtLastError());
     GUARD_CU(cudaFree((void*)lock));
+    GUARD_CU(cudaPeekAtLastError());
     GUARD_CU(cudaFree((void*)d_memory));
+
+    GUARD_CU(cudaPeekAtLastError());
 
     GUARD_CU(cudaDeviceSynchronize());
     GUARD_CU(cudaPeekAtLastError());
@@ -121,15 +131,7 @@ void mem_test(int** d_memory0, int requests_num, int blocks, int threads,
         }
     }*/
 }
-template <typename MemoryManagerType>
-__global__
-void mem_free(MemoryManagerType* mm, int** d_memory, int requests_num){
-    int thid = blockDim.x * blockIdx.x + threadIdx.x;
-    if (thid >= requests_num){
-        return;
-    }
-    mm->free(d_memory[thid]);
-}
+
 
 __device__ void acquire_semaphore(int* lock, int i){
     while (atomicCAS(&lock[i], 0, 1) != 0){

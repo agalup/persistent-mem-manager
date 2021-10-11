@@ -20,12 +20,44 @@ using namespace std;
 #define debug(a...)
 #endif
 
-#define HALLOC
-//#define OUROBOROS
+//#define HALLOC__
+//#define OUROBOROS__
 
-#ifdef HALLOC
+/*
+#ifndef HALLOC__
+    #ifndef OUROBOROS__
+        #define OUROBOROS__
+    #endif
+#endif*/
+
+#ifdef HALLOC__
 #include "Instance.cuh"
 #endif
+
+template <typename MemoryManagerType>
+__global__
+void mem_free(volatile int** d_memory, 
+#ifdef OUROBOROS__
+              MemoryManagerType* mm, 
+#else 
+    #ifdef HALLOC__
+              MemoryManagerType mm,
+    #endif
+#endif
+              volatile int* requests_num
+        ){
+    int thid = blockDim.x * blockIdx.x + threadIdx.x;
+    if (thid >= requests_num[0]){
+        return;
+    }
+#ifdef OUROBOROS__
+    mm->free((void*)d_memory[thid]);
+#else 
+    #ifdef HALLOC__
+              mm.free((void*)d_memory[thid]);
+    #endif
+#endif
+}
 
 //producer
 template <typename MemoryManagerType>
@@ -35,10 +67,10 @@ void mem_manager(volatile int* exit_signal,
                 volatile int* request_iter,
                 volatile int* request_signal, 
                 volatile int* request_ids, 
-#ifdef OUROBOROS
+#ifdef OUROBOROS__
                 MemoryManagerType* mm,
 #else
-    #ifdef HALLOC
+    #ifdef HALLOC__
                 MemoryManagerType mm,
     #endif
 #endif
@@ -62,10 +94,10 @@ void mem_manager(volatile int* exit_signal,
 
                 if (ouroboros_on){
                     d_memory[req_id] = reinterpret_cast<volatile int*>
-#ifdef HALLOC
+#ifdef HALLOC__
                         (mm.malloc(request_mem_size[request_id]));
 #else
-#ifdef OUROBOROS
+#ifdef OUROBOROS__
                         (mm->malloc(request_mem_size[request_id]));
 #endif
 #endif
@@ -131,23 +163,17 @@ void app(volatile int* exit_signal,
     atomicAdd((int*)&exit_counter[0], 1);
 }
 
-__global__
-void mem_free(volatile int** d_memory){
-    int thid = blockDim.x * blockIdx.x + threadIdx.x;
-    /*TODO*/
-}
-
 
 int main(int argc, char *argv[]){
 
-#ifdef OUROBOROS
+#ifdef OUROBOROS__
     //Ouroboros initialization
     size_t instantitation_size = 7168ULL * 1024ULL * 1024ULL;
     using MemoryMangerType = OuroPQ;
     MemoryMangerType memory_manager;
     memory_manager.initialize(instantitation_size);
 #else
-#ifdef HALLOC
+#ifdef HALLOC__
     //Halloc initialization
     size_t instantitation_size = 2048ULL * 1024ULL * 1024ULL;
     using MemoryManagerType = MemoryManagerHalloc;
@@ -179,7 +205,7 @@ int main(int argc, char *argv[]){
 
     int block_size = 1024;
     
-    std::cout << "#allocs\t\t" << "#sm app\t\t" << "#sm mm\t\t" << "app launch\t" << "app finished\t" << "app finish sync\n";
+    std::cout << "\t\t#allocs\t\t" << "#sm app\t\t" << "#sm mm\t\t" << "app launch\t" << "app finished\t" << "app finish sync\n";
 
     for (int mm_grid_size = 1; mm_grid_size < max_block_number; ++mm_grid_size){
 
@@ -187,7 +213,7 @@ int main(int argc, char *argv[]){
         *exit_counter = 0;
 
         int app_grid_size = (max_block_number) - mm_grid_size;
-
+        
         int requests_num{app_grid_size*block_size};
         
         //Request auxiliary
@@ -206,10 +232,10 @@ int main(int argc, char *argv[]){
                 requests.request_iter, 
                 requests.request_signal, 
                 requests.request_id,
-#ifdef OUROBOROS
+#ifdef OUROBOROS__
                 memory_manager.getDeviceMemoryManager(),
 #else
-#ifdef HALLOC
+#ifdef HALLOC__
                 memory_manager,
 #endif
 #endif
@@ -244,7 +270,10 @@ int main(int argc, char *argv[]){
         // Check results
         int old_counter = -1;
         int iter = 0;
-        while (1){
+        int iter2 = 0;
+        long long iter_mean = 0;
+        int time_limit = 1000000000;
+        while (iter2 < time_limit){
             if (exit_counter[0] == block_size*app_grid_size){
                 timing_total.stopMeasurement();
                 *exit_signal = 1;
@@ -261,17 +290,40 @@ int main(int argc, char *argv[]){
             }else{
                 if (exit_counter[0] != old_counter){
                     old_counter = exit_counter[0];
-                    if (iter%1000 == 0)
-                        //debug("no break, exit_counter = %d\n", exit_counter[0]);
-                        //printf("no break, exit_counter = %d\n", exit_counter[0]);
+                
                     ++iter;
+                    iter_mean += iter2;
+                    iter2 = 0;
+
+                    if (iter%1000 == 0){
+                        //debug("no break, exit_counter = %d\n", exit_counter[0]);
+                        //printf("no break, exit_counter = %d, change after %d iterations\n", exit_counter[0],\
+                        iter_mean/iter);
+                    }
                 }
+                ++iter2;
+            }
+            if (iter2 >= time_limit){
+                printf("time limit exceed, break\n");
+                *exit_signal = 1;
             }
         }
 
+        iter_mean /= iter;
+        //printf("new change each %d iterations\n", iter_mean);
+
         //Deallocate device memory
         mem_free<<<app_grid_size, block_size, 0, app_stream>>>(
-                requests.d_memory);
+                requests.d_memory, 
+#ifdef OUROBOROS__
+                memory_manager.getDeviceMemoryManager(),
+#else
+    #ifdef HALLOC__
+                memory_manager,
+    #endif
+#endif
+                requests.requests_number);
+
         requests.free();
 
         // Output
@@ -280,7 +332,7 @@ int main(int argc, char *argv[]){
         auto total_sync_time = timing_total_sync.generateResult();
         //printf("%lf %lf %lf\n", app_time, total_time, total_sync_time);
         //std::cout << "#allocs\t" << "#sm app\t" << "#sm mm\t" << "app launch time\t" << "app finished time\n";
-        printf("%d\t\t| %d\t\t| %d\t\t| %.2lf\t\t| %.2lf\t\t| %.2lf\n", 
+        printf("\t\t%d\t\t| %d\t\t| %d\t\t| %.2lf\t\t| %.2lf\t\t| %.2lf\n", 
                 requests_num, app_grid_size, mm_grid_size, app_time.mean_, total_time.mean_, total_sync_time.mean_);
     }
 
