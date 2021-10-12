@@ -19,22 +19,40 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 from numba import cuda as cu
+
+def run_test(device, test, use_malloc, instant_size):
+    SMs = getattr(device, 'MULTIPROCESSOR_COUNT')
+    size = SMs - 1;
+    
+    sm_app      = pointer((c_int * size)())
+    sm_mm       = pointer((c_int * size)())
+    allocs_size = pointer((c_int * size)())
+    app_launch  = pointer((c_float * size)())
+    app_finish  = pointer((c_float * size)())
+    app_sync    = pointer((c_float * size)())
+
+    test(use_malloc, instant_size, SMs, sm_app, sm_mm,
+    allocs_size, app_launch, app_finish, app_sync)
+
   
 def main(argv):
     ### load shared libraries
     ouroboros = cdll.LoadLibrary('ouroboros_mm.so')
     halloc = cdll.LoadLibrary('halloc_mm.so')
 
-    print("halloc test")
-    test2 = halloc.pmm_init
-    test2(1, 1024*1024*1024)
-
+    ### GPU properties
     device = cu.get_current_device()
+    instant_size = 1024*1024*1024
+    
+    print("halloc test")
+    test = halloc.pmm_init
+    run_test(device, test, 1, instant_size)
+
     device.reset()
 
     print("ouroboros test")
-    test = ouroboros.pmm_init
-    test(1, 1024*1024*1024)
+    test2 = ouroboros.pmm_init
+    run_test(device, test2, 1, instant_size)
 
 if __name__ == "__main__":
     main(sys.argv[1:])

@@ -173,7 +173,9 @@ void app(volatile int* exit_signal,
     atomicAdd((int*)&exit_counter[0], 1);
 }
 
-void pmm_init(int turn_on, size_t instant_size){
+void pmm_init(int turn_on, size_t instant_size, int SMs,
+            int* sm_app, int* sm_mm, int* allocs, 
+            float* app_launch, float* app_finish, float* app_sync){
 
 #ifdef OUROBOROS__
     //Ouroboros initialization
@@ -199,23 +201,22 @@ void pmm_init(int turn_on, size_t instant_size){
     int* exit_counter;
     GUARD_CU(cudaMallocManaged(&exit_counter, sizeof(uint32_t)));
     
-    cudaDeviceProp deviceProp;
-    cudaGetDeviceProperties(&deviceProp, 0);
-    int max_block_number = deviceProp.multiProcessorCount;
-    printf("max block number %d\n", max_block_number);
-
     int block_size = 1024;
     
     std::cout << "\t\t#allocs\t\t" << "#sm app\t\t" << "#sm mm\t\t" << "app launch\t" << "app finished\t" << "app finish sync\n";
 
-    for (int mm_grid_size = 1; mm_grid_size < max_block_number; ++mm_grid_size){
+    for (int mm_grid_size = 1; mm_grid_size < SMs; ++mm_grid_size){
 
         *exit_signal = 0;
         *exit_counter = 0;
 
-        int app_grid_size = (max_block_number) - mm_grid_size;
-        
+        int app_grid_size = SMs - mm_grid_size;
         int requests_num{app_grid_size*block_size};
+
+        //output
+        sm_app[mm_grid_size - 1] = app_grid_size;
+        sm_mm [mm_grid_size - 1] = mm_grid_size;
+        allocs[mm_grid_size - 1] = requests_num;
         
         //Request auxiliary
         RequestType requests;
@@ -273,7 +274,7 @@ void pmm_init(int turn_on, size_t instant_size){
         long long iter = 0;
         long long iter2 = 0;
         long long iter_mean = 0;
-        long long  time_limit = 1000000;
+        long long  time_limit = 100000000;
         while (iter2 < time_limit){
             if (exit_counter[0] == block_size*app_grid_size){
                 timing_total.stopMeasurement();
@@ -335,6 +336,10 @@ void pmm_init(int turn_on, size_t instant_size){
         //std::cout << "#allocs\t" << "#sm app\t" << "#sm mm\t" << "app launch time\t" << "app finished time\n";
         printf("\t\t%d\t\t| %d\t\t| %d\t\t| %.2lf\t\t| %.2lf\t\t| %.2lf\n", 
                 requests_num, app_grid_size, mm_grid_size, app_time.mean_, total_time.mean_, total_sync_time.mean_);
+
+        app_launch[mm_grid_size - 1] = app_time.mean_;
+        app_finish[mm_grid_size - 1] = total_time.mean_;
+        app_sync  [mm_grid_size - 1] = total_sync_time.mean_;
     }
 
     GUARD_CU(cudaStreamSynchronize(mm_stream));
