@@ -20,9 +20,6 @@ using namespace std;
 #define debug(a...)
 #endif
 
-//#define HALLOC__
-//#define OUROBOROS__
-
 /*
 #ifndef HALLOC__
     #ifndef OUROBOROS__
@@ -276,7 +273,7 @@ void pmm_init(int turn_on, size_t instant_size){
         long long iter = 0;
         long long iter2 = 0;
         long long iter_mean = 0;
-        long long  time_limit = 1000000000;
+        long long  time_limit = 1000000;
         while (iter2 < time_limit){
             if (exit_counter[0] == block_size*app_grid_size){
                 timing_total.stopMeasurement();
