@@ -20,7 +20,35 @@ import seaborn as sns
 
 from numba import cuda as cu
 
-def run_test(device, test, use_malloc, instant_size):
+def draw_graph(testcase, SMs, allocs_size, sm_app, sm_mm, app_launch, app_finish, app_sync):
+    sm_app_list = [sm_app[0][i] for i in range(SMs-1)]
+    sm_mm_list  = [ sm_mm[0][i] for i in range(SMs-1)]
+    #sms_list = [[sm_app_list[i], sm_mm_list[i]] for i in range(SMs-1)]
+    sms_list = ['(' + str(sm_app_list[i]) + ', ' + str(sm_mm_list[i]) + ')' for i in range(SMs -1)]
+    #sms_arr = [np.array([sm_app_list[i], sm_mm_list[i]]).reshape((1,2)) for i in range(SMs - 1)]
+    launch_list = [round(app_launch[0][i],2) for i in range(SMs-1)]
+    finish_list = [round(app_finish[0][i],2) for i in range(SMs-1)]
+    sync_list = [round(app_sync[0][i],2) for i in range(SMs-1)]
+
+    plt.figure(figsize=(50,10))
+    
+    plt.subplot(121)
+    plt.scatter(sms_list, launch_list)
+    plt.xticks(rotation=90)
+    plt.xlabel("(SMs app, SMs mm)")
+    plt.ylabel("App launch time in ms")
+       
+    plt.subplot(122)
+    plt.scatter(sms_list, sync_list)
+    plt.xticks(rotation=90)
+    plt.xlabel("(SMs app, SMs mm)")
+    plt.ylabel("App sync time in ms")
+    
+    plt.suptitle(str(testcase))
+    plt.savefig(str(testcase)+"_"+str(allocs_size)+'.png')
+    
+
+def run_test(testcase, alloc_per_thread, device, pmm_init, use_malloc, instant_size):
     SMs = getattr(device, 'MULTIPROCESSOR_COUNT')
     size = SMs - 1;
     
@@ -31,9 +59,9 @@ def run_test(device, test, use_malloc, instant_size):
     app_finish  = pointer((c_float * size)())
     app_sync    = pointer((c_float * size)())
 
-    test(use_malloc, instant_size, SMs, sm_app, sm_mm,
-    allocs_size, app_launch, app_finish, app_sync)
+    pmm_init(use_malloc, alloc_per_thread, instant_size, SMs, sm_app, sm_mm, allocs_size, app_launch, app_finish, app_sync)
 
+    draw_graph(testcase, SMs, allocs_size, sm_app, sm_mm, app_launch, app_finish, app_sync)
   
 def main(argv):
     ### load shared libraries
@@ -43,16 +71,26 @@ def main(argv):
     ### GPU properties
     device = cu.get_current_device()
     instant_size = 1024*1024*1024
+    alloc_per_thread = 4
+
+    if len(argv) > 0:
+        alloc_per_thread = argv[0]
+
+    if len(argv) > 1:
+        instant_size = argv[1]
+
+    print("alloc_per_thread {} instant_size {}".format(alloc_per_thread, instant_size))
+    
+    print("ouroboros test")
+    test2 = ouroboros.pmm_init
+    run_test("OUROBOROS", int(alloc_per_thread), device, test2, 1, instant_size)
+
+    device.reset()
     
     print("halloc test")
     test = halloc.pmm_init
-    run_test(device, test, 1, instant_size)
+    run_test("HALLOC", int(alloc_per_thread), device, test, 1, instant_size)
 
-    device.reset()
-
-    print("ouroboros test")
-    test2 = ouroboros.pmm_init
-    run_test(device, test2, 1, instant_size)
 
 if __name__ == "__main__":
     main(sys.argv[1:])

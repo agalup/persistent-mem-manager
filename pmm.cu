@@ -60,10 +60,12 @@ void mem_free(volatile int** d_memory,
         return;
     }
 #ifdef OUROBOROS__
-    mm->free((void*)d_memory[thid]);
+            if (d_memory[thid])
+                mm->free((void*)d_memory[thid]);
 #else 
     #ifdef HALLOC__
-              mm.free((void*)d_memory[thid]);
+            if (d_memory[thid])
+                mm.free((void*)d_memory[thid]);
     #endif
 #endif
 }
@@ -111,7 +113,8 @@ void mem_manager(volatile int* exit_signal,
                         (mm->malloc(request_mem_size[request_id]));
 #endif
 #endif
-                    assert(d_memory[req_id]);
+                    if (!exit_signal[0])
+                        assert(d_memory[req_id]);
                 }
 
                 // SIGNAL update
@@ -134,13 +137,16 @@ void app(volatile int* exit_signal,
          volatile int* request_mem_size,
          volatile int* request_id, 
          volatile int* exit_counter, 
-         volatile int* lock, 
+         volatile int* lock,
+         int size_to_alloc,
          int turn_on){
     int thid = blockDim.x * blockIdx.x + threadIdx.x;
 
+    //if (thid == 0)
+    //    printf("alloc size %d\n", size_to_alloc);
     // SEMAPHORE
     acquire_semaphore((int*)lock, thid);
-    request_mem_size[thid] = 4;
+    request_mem_size[thid] = size_to_alloc;
     request_id[thid] = -1;
     int req_id = -1;
     // SIGNAL update
@@ -157,7 +163,7 @@ void app(volatile int* exit_signal,
             // SEMAPHORE
             acquire_semaphore((int*)lock, thid);
             req_id = request_id[thid];
-            if (req_id >= 0 && turn_on) {
+            if (req_id >= 0 && turn_on && !exit_signal[0]) {
                 assert(d_memory[req_id]);
                 d_memory[req_id][0] = thid;
             }
@@ -172,8 +178,13 @@ void app(volatile int* exit_signal,
     }
     atomicAdd((int*)&exit_counter[0], 1);
 }
+/*
+float round_time(float var){
+    float value = (int)(var * 100 + .5);
+    return (float)value/100;
+}*/
 
-void pmm_init(int turn_on, size_t instant_size, int SMs,
+void pmm_init(int turn_on, int size_to_alloc, size_t instant_size, int SMs,
             int* sm_app, int* sm_mm, int* allocs, 
             float* app_launch, float* app_finish, float* app_sync){
 
@@ -189,19 +200,26 @@ void pmm_init(int turn_on, size_t instant_size, int SMs,
 #endif
 #endif
  
+    GUARD_CU(cudaPeekAtLastError());
     //Creat two asynchronous streams which may run concurrently with the default stream 0.
     //The streams are not synchronized with the default stream.
     cudaStream_t mm_stream, app_stream;
     GUARD_CU(cudaStreamCreateWithFlags( &mm_stream, cudaStreamNonBlocking));
+    GUARD_CU(cudaPeekAtLastError());
     GUARD_CU(cudaStreamCreateWithFlags(&app_stream, cudaStreamNonBlocking));
+    GUARD_CU(cudaPeekAtLastError());
     
     int* exit_signal;
     GUARD_CU(cudaMallocManaged(&exit_signal, sizeof(int32_t)));
+    GUARD_CU(cudaPeekAtLastError());
 
     int* exit_counter;
     GUARD_CU(cudaMallocManaged(&exit_counter, sizeof(uint32_t)));
+    GUARD_CU(cudaPeekAtLastError());
     
     int block_size = 1024;
+
+    printf("size to alloc per thread %d\n", size_to_alloc);
     
     std::cout << "\t\t#allocs\t\t" << "#sm app\t\t" << "#sm mm\t\t" << "app launch\t" << "app finished\t" << "app finish sync\n";
 
@@ -262,7 +280,8 @@ void pmm_init(int turn_on, size_t instant_size, int SMs,
                 requests.request_mem_size, 
                 requests.request_id, 
                 exit_counter, 
-                requests.lock, 
+                requests.lock,
+                size_to_alloc,
                 turn_on);
         timing_app.stopMeasurement();
 
@@ -311,9 +330,11 @@ void pmm_init(int turn_on, size_t instant_size, int SMs,
             }
         }
 
-        iter_mean /= iter;
+        if (iter != 0)
+            iter_mean /= iter;
         //printf("new change each %d iterations\n", iter_mean);
 
+        GUARD_CU(cudaPeekAtLastError());
         //Deallocate device memory
         mem_free<<<app_grid_size, block_size, 0, app_stream>>>(
                 requests.d_memory, 
@@ -326,7 +347,9 @@ void pmm_init(int turn_on, size_t instant_size, int SMs,
 #endif
                 requests.requests_number);
 
+        GUARD_CU(cudaPeekAtLastError());
         requests.free();
+        GUARD_CU(cudaPeekAtLastError());
 
         // Output
         auto app_time = timing_app.generateResult();
@@ -337,9 +360,9 @@ void pmm_init(int turn_on, size_t instant_size, int SMs,
         printf("\t\t%d\t\t| %d\t\t| %d\t\t| %.2lf\t\t| %.2lf\t\t| %.2lf\n", 
                 requests_num, app_grid_size, mm_grid_size, app_time.mean_, total_time.mean_, total_sync_time.mean_);
 
-        app_launch[mm_grid_size - 1] = app_time.mean_;
-        app_finish[mm_grid_size - 1] = total_time.mean_;
-        app_sync  [mm_grid_size - 1] = total_sync_time.mean_;
+        app_launch[mm_grid_size - 1] = (app_time.mean_);
+        app_finish[mm_grid_size - 1] = (total_time.mean_);
+        app_sync  [mm_grid_size - 1] = (total_sync_time.mean_);
     }
 
     GUARD_CU(cudaStreamSynchronize(mm_stream));
