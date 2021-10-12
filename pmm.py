@@ -18,17 +18,23 @@ import plotly
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-   
+from numba import cuda as cu
+  
 def main(argv):
     ### load shared libraries
     ouroboros = cdll.LoadLibrary('ouroboros_mm.so')
     halloc = cdll.LoadLibrary('halloc_mm.so')
 
-    test = ouroboros.pmm_init;
-    test(1, 1024*1024*1024);
-    
-    test2 = halloc.pmm_init;
-    test2(1, 1024*1024*1024);
+    print("halloc test")
+    test2 = halloc.pmm_init
+    test2(1, 1024*1024*1024)
+
+    device = cu.get_current_device()
+    device.reset()
+
+    print("ouroboros test")
+    test = ouroboros.pmm_init
+    test(1, 1024*1024*1024)
 
 if __name__ == "__main__":
     main(sys.argv[1:])
