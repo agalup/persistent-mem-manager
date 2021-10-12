@@ -6,3 +6,6 @@
 *.fatbin
 a.out
 *.swp
+halloc_mm
+ouroboros_mm
+*.so
