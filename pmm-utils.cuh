@@ -73,7 +73,6 @@ void RequestType::free(){
     GUARD_CU(cudaFree((void*)lock));
     GUARD_CU(cudaPeekAtLastError());
     GUARD_CU(cudaFree((void*)d_memory));
-
     GUARD_CU(cudaPeekAtLastError());
 
     GUARD_CU(cudaDeviceSynchronize());
