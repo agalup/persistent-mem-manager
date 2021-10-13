@@ -26,7 +26,12 @@ def draw_graph(testcase, alloc_per_thread, iteration_num, SMs, allocs_size,
 
     sm_app_list = [sm_app[0][i] for i in range(SMs-1)]
     sm_mm_list  = [ sm_mm[0][i] for i in range(SMs-1)]
-    sms_list = ['(' + str(sm_app_list[i]) + ', ' + str(sm_mm_list[i]) + ')' for i in range(SMs -1)]
+    sms_list = ['(' + str(sm_app_list[i]) + ', ' + 
+                str(sm_mm_list[i]) + ') ' for i in range(SMs -1)]
+
+    sms_list_req = ['(' + str(sm_app_list[i]) + ', ' + 
+                str(sm_mm_list[i]) + ') ' + 
+                str(allocs_size[0][i]) for i in range(SMs -1)]
     
     launch_list     = [round(app_launch     [0][i],2) for i in range(SMs-1)]
     finish_list     = [round(app_finish     [0][i],2) for i in range(SMs-1)]
@@ -36,7 +41,7 @@ def draw_graph(testcase, alloc_per_thread, iteration_num, SMs, allocs_size,
     sync_list       = [round(app_sync       [0][i],2) for i in range(SMs-1)]
     uni_req_num     = [round(uni_req_num    [0][i],1) for i in range(SMs-1)]
 
-    plt.figure(figsize=(30,10))
+    plt.figure(figsize=(30,15))
     
     plt.subplot(131)
     plt.plot   (sms_list, uni_req_num, color='blue')
@@ -45,22 +50,26 @@ def draw_graph(testcase, alloc_per_thread, iteration_num, SMs, allocs_size,
     plt.scatter(sms_list, uni_req_num_pmm, color='red')
     plt.xticks(rotation=90)
     plt.xlabel("(SMs app, SMs mm)")
-    plt.ylabel("Blue - memory manager in app, Red - persistent memory manager")
-    plt.caption("The number of requests per a sec depended on the number SMs app/mm")
+    plt.ylabel("Number of requests per sec")
+    plt.title("Red - persistent memory man. Blue - standard")
 
     plt.subplot(132)
-    plt.plot(sms_list, sync_list)
-    plt.scatter(sms_list, sync_list)
+    plt.plot    (sms_list_req, sync_list, color='blue')
+    plt.scatter (sms_list_req, sync_list, color='blue')
+    plt.plot    (sms_list_req, sync_list_pmm, color='red')
+    plt.scatter (sms_list_req, sync_list_pmm, color='red')
     plt.xticks(rotation=90)
-    plt.xlabel("(SMs app, SMs mm)")
-    plt.ylabel("App sync time in ms")
+    plt.xlabel("(SMs app, SMs mm) #requests (allocations)")
+    plt.ylabel("ms")
+    plt.title("Red - persistent memory man. Blue - standard")
    
     plt.subplot(133)
-    plt.plot(sms_list, launch_list)
-    plt.scatter(sms_list, launch_list)
+    plt.plot    (sms_list, launch_list)
+    plt.scatter (sms_list, launch_list)
     plt.xticks(rotation=90)
     plt.xlabel("(SMs app, SMs mm)")
-    plt.ylabel("App launch time in ms")
+    plt.ylabel("ms")
+    plt.title("App launch time persistent man")
         
     plt.suptitle(str(testcase))
     plt.savefig(str(testcase)+"_"+str(SMs)+"SMs_"+str(alloc_per_thread)+"_"+str(iteration_num)+'.png')
