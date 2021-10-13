@@ -20,7 +20,8 @@ import seaborn as sns
 
 from numba import cuda as cu
 
-def draw_graph(testcase, alloc_per_thread, iteration_num, SMs, allocs_size, sm_app, sm_mm, app_launch, app_finish, app_sync):
+def draw_graph(testcase, alloc_per_thread, iteration_num, SMs, allocs_size, sm_app, sm_mm, app_launch, app_finish,
+app_sync, uni_req_num):
     sm_app_list = [sm_app[0][i] for i in range(SMs-1)]
     sm_mm_list  = [ sm_mm[0][i] for i in range(SMs-1)]
     #sms_list = [[sm_app_list[i], sm_mm_list[i]] for i in range(SMs-1)]
@@ -29,23 +30,35 @@ def draw_graph(testcase, alloc_per_thread, iteration_num, SMs, allocs_size, sm_a
     launch_list = [round(app_launch[0][i],2) for i in range(SMs-1)]
     finish_list = [round(app_finish[0][i],2) for i in range(SMs-1)]
     sync_list = [round(app_sync[0][i],2) for i in range(SMs-1)]
+    uni_req_num_list = [round(uni_req_num[0][i]) for i in range(SMs-1)]
 
-    plt.figure(figsize=(50,10))
+    #print(uni_req_num_list)
+
+    plt.figure(figsize=(30,10))
     
-    plt.subplot(121)
-    plt.scatter(sms_list, launch_list)
+    plt.subplot(131)
+    plt.plot(sms_list, uni_req_num_list)
+    plt.scatter(sms_list, uni_req_num_list)
     plt.xticks(rotation=90)
     plt.xlabel("(SMs app, SMs mm)")
-    plt.ylabel("App launch time in ms")
-       
-    plt.subplot(122)
+    plt.ylabel("The number of requests per a sec depended on the number SMs app/mm")
+
+    plt.subplot(132)
+    plt.plot(sms_list, sync_list)
     plt.scatter(sms_list, sync_list)
     plt.xticks(rotation=90)
     plt.xlabel("(SMs app, SMs mm)")
     plt.ylabel("App sync time in ms")
-    
+   
+    plt.subplot(133)
+    plt.plot(sms_list, launch_list)
+    plt.scatter(sms_list, launch_list)
+    plt.xticks(rotation=90)
+    plt.xlabel("(SMs app, SMs mm)")
+    plt.ylabel("App launch time in ms")
+        
     plt.suptitle(str(testcase))
-    plt.savefig(str(testcase)+"_"+str(alloc_per_thread)+"_"+str(iteration_num)+'.png')
+    plt.savefig(str(testcase)+"_"+str(SMs)+"SMs_"+str(alloc_per_thread)+"_"+str(iteration_num)+'.png')
     
 
 def run_test(testcase, alloc_per_thread, device, pmm_init, use_malloc, instant_size, iteration_num):
@@ -58,10 +71,13 @@ def run_test(testcase, alloc_per_thread, device, pmm_init, use_malloc, instant_s
     app_launch  = pointer((c_float * size)())
     app_finish  = pointer((c_float * size)())
     app_sync    = pointer((c_float * size)())
+    uni_req_num = pointer((c_float * size)())
 
-    pmm_init(use_malloc, alloc_per_thread, instant_size, iteration_num, SMs, sm_app, sm_mm, allocs_size, app_launch, app_finish, app_sync)
+    pmm_init(use_malloc, alloc_per_thread, instant_size, iteration_num, SMs, sm_app, sm_mm, allocs_size, app_launch,
+    app_finish, app_sync, uni_req_num)
 
-    draw_graph(testcase, alloc_per_thread, iteration_num, SMs, allocs_size, sm_app, sm_mm, app_launch, app_finish, app_sync)
+    draw_graph(testcase, alloc_per_thread, iteration_num, SMs, allocs_size, sm_app, sm_mm, app_launch, app_finish,
+    app_sync, uni_req_num)
   
 def main(argv):
     ### load shared libraries

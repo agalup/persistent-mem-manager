@@ -28,15 +28,16 @@ int main(int argc, char *argv[]){
     printf("max block number %d\n", SMs);
     int size = SMs - 1;
 
-    int* sm_app      = (int*)malloc(sizeof(int)*size);
-    int* sm_mm       = (int*)malloc(sizeof(int)*size);
-    int* allocs_size = (int*)malloc(sizeof(int)*size);
-    float* app_launch = (float*)malloc(sizeof(float)*size);
-    float* app_finish = (float*)malloc(sizeof(float)*size);
-    float* app_sync   = (float*)malloc(sizeof(float)*size);
+    int* sm_app        = (int*)malloc(sizeof(int)*size);
+    int* sm_mm         = (int*)malloc(sizeof(int)*size);
+    int* allocs_size   = (int*)malloc(sizeof(int)*size);
+    float* app_launch  = (float*)malloc(sizeof(float)*size);
+    float* app_finish  = (float*)malloc(sizeof(float)*size);
+    float* app_sync    = (float*)malloc(sizeof(float)*size);
+    float* uni_req_num = (float*)malloc(sizeof(float)*size);
     
     pmm_init(turn_on, size_to_alloc, instant_size, iteration_num, SMs, sm_app, sm_mm, 
-            allocs_size, app_launch, app_finish, app_sync);
+            allocs_size, app_launch, app_finish, app_sync, uni_req_num);
 
     printf("DONE!\n");
     return 0;
