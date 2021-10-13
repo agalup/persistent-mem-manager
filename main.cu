@@ -5,10 +5,17 @@ int main(int argc, char *argv[]){
 
     size_t instant_size = 1024ULL * 1024ULL * 1024ULL;
     int size_to_alloc = 4;
+    int iteration_num = 1;
 
     int turn_on = 1;
     if (argc > 1){
         turn_on = atoi(argv[1]);
+    }
+    if (argc > 2){
+        iteration_num = atoi(argv[2]);
+    }
+    if (argc > 3){
+        instant_size = atoi(argv[3]);
     }
 
    // int* app_launch = (int*)malloc
@@ -25,8 +32,8 @@ int main(int argc, char *argv[]){
     float* app_finish = (float*)malloc(sizeof(float)*size);
     float* app_sync   = (float*)malloc(sizeof(float)*size);
     
-    pmm_init(turn_on, size_to_alloc, instant_size, SMs, sm_app, sm_mm, allocs_size, 
-            app_launch, app_finish, app_sync);
+    pmm_init(turn_on, size_to_alloc, instant_size, iteration_num, SMs, sm_app, sm_mm, 
+            allocs_size, app_launch, app_finish, app_sync);
 
     printf("DONE!\n");
     return 0;

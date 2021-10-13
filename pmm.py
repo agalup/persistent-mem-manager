@@ -48,7 +48,7 @@ def draw_graph(testcase, SMs, allocs_size, sm_app, sm_mm, app_launch, app_finish
     plt.savefig(str(testcase)+"_"+str(allocs_size)+'.png')
     
 
-def run_test(testcase, alloc_per_thread, device, pmm_init, use_malloc, instant_size):
+def run_test(testcase, alloc_per_thread, device, pmm_init, use_malloc, instant_size, iteration_num):
     SMs = getattr(device, 'MULTIPROCESSOR_COUNT')
     size = SMs - 1;
     
@@ -59,7 +59,7 @@ def run_test(testcase, alloc_per_thread, device, pmm_init, use_malloc, instant_s
     app_finish  = pointer((c_float * size)())
     app_sync    = pointer((c_float * size)())
 
-    pmm_init(use_malloc, alloc_per_thread, instant_size, SMs, sm_app, sm_mm, allocs_size, app_launch, app_finish, app_sync)
+    pmm_init(use_malloc, alloc_per_thread, instant_size, iteration_num, SMs, sm_app, sm_mm, allocs_size, app_launch, app_finish, app_sync)
 
     draw_graph(testcase, SMs, allocs_size, sm_app, sm_mm, app_launch, app_finish, app_sync)
   
@@ -72,24 +72,28 @@ def main(argv):
     device = cu.get_current_device()
     instant_size = 1024*1024*1024
     alloc_per_thread = 4
+    iteration_num = 1
 
     if len(argv) > 0:
         alloc_per_thread = argv[0]
 
     if len(argv) > 1:
-        instant_size = argv[1]
+        iteration_num = argv[1]
 
-    print("alloc_per_thread {} instant_size {}".format(alloc_per_thread, instant_size))
+    if len(argv) > 2:
+        instant_size = argv[2]
+
+    print("alloc_per_thread {} iteration_num {} instant_size {}".format(alloc_per_thread, iteration_num, instant_size))
     
     print("ouroboros test")
     test2 = ouroboros.pmm_init
-    run_test("OUROBOROS", int(alloc_per_thread), device, test2, 1, instant_size)
+    run_test("OUROBOROS", int(alloc_per_thread), device, test2, 1, instant_size, int(iteration_num))
 
     device.reset()
     
     print("halloc test")
     test = halloc.pmm_init
-    run_test("HALLOC", int(alloc_per_thread), device, test, 1, instant_size)
+    run_test("HALLOC", int(alloc_per_thread), device, test, 1, instant_size, int(iteration_num))
 
 
 if __name__ == "__main__":
