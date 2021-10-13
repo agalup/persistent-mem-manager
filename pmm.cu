@@ -226,9 +226,6 @@ void pmm_init(int turn_on, int size_to_alloc, size_t instant_size, size_t num_it
         sm_mm [mm_grid_size - 1] = mm_grid_size;
         allocs[mm_grid_size - 1] = requests_num;
 
-        RequestType requests;
-        requests.init(requests_num);
-
         //Timing variables
         PerfMeasure timing_app, timing_mm, timing_total, timing_total_sync;
 
@@ -236,7 +233,9 @@ void pmm_init(int turn_on, int size_to_alloc, size_t instant_size, size_t num_it
 
             *exit_signal = 0;
             *exit_counter = 0;
-            
+
+            RequestType requests;
+            requests.init(requests_num);
             requests.memset();
 
             timing_mm.startMeasurement();
@@ -263,7 +262,6 @@ void pmm_init(int turn_on, int size_to_alloc, size_t instant_size, size_t num_it
             timing_app.startMeasurement();
             timing_total.startMeasurement();
             timing_total_sync.startMeasurement();
-            
             //Run application
             app<<<app_grid_size, block_size, 0, app_stream>>>(exit_signal, 
                     requests.d_memory, 
@@ -322,24 +320,24 @@ void pmm_init(int turn_on, int size_to_alloc, size_t instant_size, size_t num_it
             if (iter != 0)
                 iter_mean /= iter;
             //printf("new change each %d iterations\n", iter_mean);
-        }
-        GUARD_CU(cudaPeekAtLastError());
-        //Deallocate device memory
-        mem_free<<<app_grid_size, block_size, 0, app_stream>>>(
-                requests.d_memory, 
+            GUARD_CU(cudaPeekAtLastError());
+            //Deallocate device memory
+            mem_free<<<app_grid_size, block_size, 0, app_stream>>>(
+                    requests.d_memory, 
 #ifdef OUROBOROS__
-                memory_manager.getDeviceMemoryManager(),
+                    memory_manager.getDeviceMemoryManager(),
 #else
 #ifdef HALLOC__
-                memory_manager,
+                    memory_manager,
 #endif
 #endif
-                requests.requests_number);
+                    requests.requests_number);
 
-        GUARD_CU(cudaPeekAtLastError());
-        requests.free();
-        GUARD_CU(cudaPeekAtLastError());
+            GUARD_CU(cudaPeekAtLastError());
+            requests.free();
+            GUARD_CU(cudaPeekAtLastError());
 
+        }
         // Output
         auto app_time = timing_app.generateResult();
         auto total_time = timing_total.generateResult();

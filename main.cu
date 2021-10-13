@@ -8,8 +8,11 @@ int main(int argc, char *argv[]){
     int iteration_num = 1;
 
     int turn_on = 1;
-    if (argc > 1){
+    /*if (argc > 1){
         turn_on = atoi(argv[1]);
+    }*/
+    if (argc > 1){
+        size_to_alloc = atoi(argv[1]);
     }
     if (argc > 2){
         iteration_num = atoi(argv[2]);

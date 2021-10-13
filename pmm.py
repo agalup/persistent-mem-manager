@@ -20,7 +20,7 @@ import seaborn as sns
 
 from numba import cuda as cu
 
-def draw_graph(testcase, SMs, allocs_size, sm_app, sm_mm, app_launch, app_finish, app_sync):
+def draw_graph(testcase, alloc_per_thread, iteration_num, SMs, allocs_size, sm_app, sm_mm, app_launch, app_finish, app_sync):
     sm_app_list = [sm_app[0][i] for i in range(SMs-1)]
     sm_mm_list  = [ sm_mm[0][i] for i in range(SMs-1)]
     #sms_list = [[sm_app_list[i], sm_mm_list[i]] for i in range(SMs-1)]
@@ -45,7 +45,7 @@ def draw_graph(testcase, SMs, allocs_size, sm_app, sm_mm, app_launch, app_finish
     plt.ylabel("App sync time in ms")
     
     plt.suptitle(str(testcase))
-    plt.savefig(str(testcase)+"_"+str(allocs_size)+'.png')
+    plt.savefig(str(testcase)+"_"+str(alloc_per_thread)+"_"+str(iteration_num)+'.png')
     
 
 def run_test(testcase, alloc_per_thread, device, pmm_init, use_malloc, instant_size, iteration_num):
@@ -61,7 +61,7 @@ def run_test(testcase, alloc_per_thread, device, pmm_init, use_malloc, instant_s
 
     pmm_init(use_malloc, alloc_per_thread, instant_size, iteration_num, SMs, sm_app, sm_mm, allocs_size, app_launch, app_finish, app_sync)
 
-    draw_graph(testcase, SMs, allocs_size, sm_app, sm_mm, app_launch, app_finish, app_sync)
+    draw_graph(testcase, alloc_per_thread, iteration_num, SMs, allocs_size, sm_app, sm_mm, app_launch, app_finish, app_sync)
   
 def main(argv):
     ### load shared libraries
