@@ -44,6 +44,7 @@ extern "C"{
 
 __global__
 void mem_free(volatile int** d_memory, 
+              volatile int* request_id, 
 #ifdef OUROBOROS__
               //OuroPQ* mm,
               MemoryManagerType* mm, 
@@ -60,12 +61,13 @@ void mem_free(volatile int** d_memory,
         return;
     }
 #ifdef OUROBOROS__
-            if (d_memory[thid])
-                mm->free((void*)d_memory[thid]);
+    if (request_id[thid] > -1)
+        mm->free((void*)d_memory[thid]);
 #else 
     #ifdef HALLOC__
-            if (d_memory[thid])
-                mm.free((void*)d_memory[thid]);
+    if (request_id[thid] > -1 && d_memory[thid]){
+        mm.free((void*)d_memory[thid]);
+    }
     #endif
 #endif
 }
@@ -79,12 +81,14 @@ void mem_free_perf(volatile int** d_memory,
               MemoryManagerType mm, 
     #endif
 #endif
-              int requests_num
+              int requests_num, 
+              int turn_on
         ){
     int thid = blockDim.x * blockIdx.x + threadIdx.x;
     if (thid >= requests_num){
         return;
     }
+    if (turn_on){
 #ifdef OUROBOROS__
             if (d_memory[thid])
                 mm->free((void*)d_memory[thid]);
@@ -94,6 +98,7 @@ void mem_free_perf(volatile int** d_memory,
                 mm.free((void*)d_memory[thid]);
     #endif
 #endif
+    }
 }
 //producer
 __global__
@@ -118,7 +123,7 @@ void mem_manager(volatile int* exit_signal,
     int thid = blockIdx.x * blockDim.x + threadIdx.x;
     
     while (! exit_signal[0]){
-        for (int request_id=thid; request_id<requests_number[0]; 
+        for (int request_id=thid; !exit_signal[0] && request_id<requests_number[0]; 
                 request_id += blockDim.x*gridDim.x){
 
             if (request_signal[request_id] == 1){
@@ -138,8 +143,15 @@ void mem_manager(volatile int* exit_signal,
                         (mm->malloc(request_mem_size[request_id]));
 #endif
 #endif
-                    if (!exit_signal[0])
-                        assert(d_memory[req_id]);
+                    __threadfence();
+                    if (!exit_signal[0]){
+                        if (!d_memory[req_id]){
+                            printf("request failed\n");
+                            //exit_signal[0] = 1;
+                            //exit(1);
+                            assert(d_memory[req_id]);
+                        }
+                    }
                 }
 
                 // SIGNAL update
@@ -214,24 +226,28 @@ void simple_alloc(volatile int** d_memory,
         MemoryManagerType mm, 
 #endif
 #endif
-        int size_to_alloc
+        int size_to_alloc,
+        int turn_on
         ){
 
     int thid = blockDim.x * blockIdx.x + threadIdx.x;
-
-    d_memory[thid] = reinterpret_cast<volatile int*>
+    if (turn_on){
+        d_memory[thid] = reinterpret_cast<volatile int*>
 #ifdef HALLOC__
-        (mm.malloc(size_to_alloc));
+            (mm.malloc(size_to_alloc));
 #else
 #ifdef OUROBOROS__
-    (mm->malloc(size_to_alloc));
+        (mm->malloc(size_to_alloc));
 #endif
 #endif
+    }
     atomicAdd((int*)&exit_counter[0], 1);
 }
 
-void perf_alloc(int size_to_alloc, size_t instant_size, size_t num_iterations, 
-            int SMs, float* app_sync, float* uni_req_num){
+void perf_alloc(int size_to_alloc, size_t* ins_size, size_t num_iterations, 
+            int SMs, float* app_sync, float* uni_req_num, int turn_on){
+
+    auto instant_size = *ins_size;
 
 #ifdef OUROBOROS__
     //Ouroboros initialization
@@ -284,7 +300,8 @@ void perf_alloc(int size_to_alloc, size_t instant_size, size_t num_iterations,
                     memory_manager,
 #endif
 #endif                   
-                    size_to_alloc);
+                    size_to_alloc, 
+                    turn_on);
             GUARD_CU(cudaPeekAtLastError());
 
             // Check results
@@ -292,16 +309,18 @@ void perf_alloc(int size_to_alloc, size_t instant_size, size_t num_iterations,
             long long iter = 0;
             long long iter2 = 0;
             long long iter_mean = 0;
-            long long  time_limit = 100000000;
+            long long  time_limit = 10000000000;
             while (iter2 < time_limit){
                 if (exit_counter[0] == requests_num){
                     GUARD_CU(cudaDeviceSynchronize());
                     GUARD_CU(cudaPeekAtLastError());
                     timing_total_sync.stopMeasurement();
-                    test1<<<app_grid_size, block_size, 0, app_stream>>>(d_memory);
-                    GUARD_CU(cudaDeviceSynchronize());
-                    GUARD_CU(cudaPeekAtLastError());
-                    mem_test((int**)d_memory, requests_num, app_grid_size, block_size, app_stream);
+                    if (turn_on){
+                        test1<<<app_grid_size, block_size, 0, app_stream>>>(d_memory);
+                        GUARD_CU(cudaDeviceSynchronize());
+                        GUARD_CU(cudaPeekAtLastError());
+                        mem_test((int**)d_memory, requests_num, app_grid_size, block_size, app_stream);
+                    }
                     break;
                 }else{
                     if (exit_counter[0] != old_counter){
@@ -312,6 +331,7 @@ void perf_alloc(int size_to_alloc, size_t instant_size, size_t num_iterations,
                     }
                     ++iter2;
                 }
+                //was no change
                 if (iter2 >= time_limit){
                     printf("time limit exceed, break\n");
                 }
@@ -319,7 +339,14 @@ void perf_alloc(int size_to_alloc, size_t instant_size, size_t num_iterations,
 
             if (iter != 0)
                 iter_mean /= iter;
-         
+        
+            if (iter2 >= time_limit){
+                printf("%d: sync\n", __LINE__);
+            }
+            GUARD_CU(cudaDeviceSynchronize());
+            if (iter2 >= time_limit){
+                printf("%d: sync done\n", __LINE__);
+            }
             GUARD_CU(cudaPeekAtLastError());
             //Deallocate device memory
             mem_free_perf<<<app_grid_size, block_size, 0, app_stream>>>(
@@ -331,7 +358,7 @@ void perf_alloc(int size_to_alloc, size_t instant_size, size_t num_iterations,
                     memory_manager,
 #endif
 #endif
-                    requests_num);
+                    requests_num, turn_on);
             GUARD_CU(cudaFree((void*)d_memory));
             GUARD_CU(cudaPeekAtLastError());
         }
@@ -351,9 +378,11 @@ void perf_alloc(int size_to_alloc, size_t instant_size, size_t num_iterations,
     GUARD_CU(cudaPeekAtLastError());
 }
 
-void pmm_init(int turn_on, int size_to_alloc, size_t instant_size, size_t num_iterations, 
+void pmm_init(int turn_on, int size_to_alloc, size_t* ins_size, size_t num_iterations, 
             int SMs, int* sm_app, int* sm_mm, int* allocs, float* app_launch, 
             float* app_finish, float* app_sync, float* uni_req_num){
+
+    auto instant_size = *ins_size;
 
 #ifdef OUROBOROS__
     //Ouroboros initialization
@@ -366,6 +395,7 @@ void pmm_init(int turn_on, int size_to_alloc, size_t instant_size, size_t num_it
 #endif
 #endif
  
+    GUARD_CU(cudaDeviceSynchronize());
     GUARD_CU(cudaPeekAtLastError());
     //Creat two asynchronous streams which may run concurrently with the default stream 0.
     //The streams are not synchronized with the default stream.
@@ -381,11 +411,12 @@ void pmm_init(int turn_on, int size_to_alloc, size_t instant_size, size_t num_it
 
     int* exit_counter;
     GUARD_CU(cudaMallocManaged(&exit_counter, sizeof(uint32_t)));
+    GUARD_CU(cudaDeviceSynchronize());
     GUARD_CU(cudaPeekAtLastError());
     
     int block_size = 1024;
 
-    printf("size to alloc per thread %d, num iterations %d\n", size_to_alloc, num_iterations);
+    printf("size to alloc per thread %d, num iterations %d, instantsize %ld\n", size_to_alloc, num_iterations, instant_size);
     
     std::cout << "\t\t#allocs\t\t" << "#sm app\t\t" << "#sm mm\t\t" << 
                 "#req per sec\t\t" << "app launch\t" << "app finished\t" << 
@@ -490,17 +521,28 @@ void pmm_init(int turn_on, int size_to_alloc, size_t instant_size, size_t num_it
                 if (iter2 >= time_limit){
                     printf("time limit exceed, break\n");
                     *exit_signal = 1;
+                    GUARD_CU(cudaDeviceSynchronize());
+                    GUARD_CU(cudaPeekAtLastError());
+
                 }
             }
 
             if (iter != 0)
                 iter_mean /= iter;
          
+/*            if (iter2 >= time_limit){
+                printf("%d: sync\n", __LINE__);
+            }
+            GUARD_CU(cudaDeviceSynchronize());
+            if (iter2 >= time_limit){
+                printf("%d: sync done\n", __LINE__);
+            }*/
             //printf("new change each %d iterations\n", iter_mean);
             GUARD_CU(cudaPeekAtLastError());
             //Deallocate device memory
             mem_free<<<app_grid_size, block_size, 0, app_stream>>>(
                     requests.d_memory, 
+                    requests.request_id, 
 #ifdef OUROBOROS__
                     memory_manager.getDeviceMemoryManager(),
 #else
@@ -510,10 +552,10 @@ void pmm_init(int turn_on, int size_to_alloc, size_t instant_size, size_t num_it
 #endif
                     requests.requests_number);
 
+            GUARD_CU(cudaDeviceSynchronize());
             GUARD_CU(cudaPeekAtLastError());
             requests.free();
             GUARD_CU(cudaPeekAtLastError());
-
         }
         // Output
         auto app_time = timing_app.generateResult();

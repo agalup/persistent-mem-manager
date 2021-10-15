@@ -76,9 +76,12 @@ def draw_graph(testcase, alloc_per_thread, iteration_num, SMs, allocs_size,
     
 
 def run_test(testcase, alloc_per_thread, device, pmm_init, perf_alloc, use_malloc, instant_size, iteration_num):
+
+
     SMs = getattr(device, 'MULTIPROCESSOR_COUNT')
     size = SMs - 1;
-    
+   
+    instant_size    = pointer((c_size_t)(instant_size))
     sm_app          = pointer((c_int * size)())
     sm_mm           = pointer((c_int * size)())
     allocs_size     = pointer((c_int * size)())
@@ -89,6 +92,8 @@ def run_test(testcase, alloc_per_thread, device, pmm_init, perf_alloc, use_mallo
     uni_req_num_pmm = pointer((c_float * size)())
     uni_req_num     = pointer((c_float * size)())
 
+    print("instant_size = ", instant_size[0])
+
     pmm_init(use_malloc, alloc_per_thread, instant_size, iteration_num, 
              SMs, sm_app, sm_mm, allocs_size, app_launch, app_finish, 
              app_sync_pmm, uni_req_num_pmm);
@@ -96,7 +101,7 @@ def run_test(testcase, alloc_per_thread, device, pmm_init, perf_alloc, use_mallo
     device.reset()
 
     perf_alloc(alloc_per_thread, instant_size, iteration_num, SMs, 
-               app_sync, uni_req_num)
+               app_sync, uni_req_num, use_malloc)
 
     draw_graph(testcase, alloc_per_thread, iteration_num, SMs, allocs_size, 
                sm_app, sm_mm, app_launch, app_finish, 
@@ -109,7 +114,9 @@ def main(argv):
 
     ### GPU properties
     device = cu.get_current_device()
-    instant_size = 1024*1024*1024
+
+    instant_size = (2 ** (3+10+10+10)) #(8*1024*1024*1024)
+    print("instant_size ", instant_size)
     alloc_per_thread = 4
     iteration_num = 1
 
@@ -124,10 +131,10 @@ def main(argv):
 
     print("alloc_per_thread {} iteration_num {} instant_size {}".format(alloc_per_thread, iteration_num, instant_size))
     
-    print("ouroboros test")
-    pmm_init = ouroboros.pmm_init
-    perf_alloc = ouroboros.perf_alloc
-    run_test("OUROBOROS", int(alloc_per_thread), device, pmm_init, perf_alloc, 1, instant_size, int(iteration_num))
+    #print("ouroboros test")
+    #pmm_init = ouroboros.pmm_init
+    #perf_alloc = ouroboros.perf_alloc
+    #run_test("OUROBOROS", int(alloc_per_thread), device, pmm_init, perf_alloc, 1, instant_size, int(iteration_num))
 
     device.reset()
     

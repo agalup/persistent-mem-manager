@@ -59,6 +59,7 @@ void RequestType::init(size_t Size){
 
 void RequestType::free(){
 
+    GUARD_CU(cudaDeviceSynchronize());
     GUARD_CU(cudaPeekAtLastError());
     GUARD_CU(cudaFree((void*)requests_number));
     GUARD_CU(cudaPeekAtLastError());
