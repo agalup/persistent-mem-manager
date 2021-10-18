@@ -7,7 +7,7 @@ int main(int argc, char *argv[]){
     int size_to_alloc = 4;
     int iteration_num = 1;
 
-    int turn_on = 0;//1;
+    int turn_on = 1;
     /*if (argc > 1){
         turn_on = atoi(argv[1]);
     }*/
