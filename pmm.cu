@@ -118,7 +118,7 @@ void mem_manager(volatile int* exit_signal,
     int thid = blockIdx.x * blockDim.x + threadIdx.x;
     
     while (! exit_signal[0]){
-        for (int request_id=thid; request_id<requests_number[0]; 
+        for (int request_id=thid; request_id<requests_number[0] && !exit_signal[0]; 
                 request_id += blockDim.x*gridDim.x){
 
             if (request_signal[request_id] == 1){
