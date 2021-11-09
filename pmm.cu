@@ -169,6 +169,75 @@ void mem_manager(volatile int* exit_signal,
     }
 }
 
+__device__
+void post_request(volatile int* lock,
+                  volatile int* request_mem_size,
+                  volatile int* request_id,
+                  volatile int* request_signal,
+                  int size_to_alloc){
+
+    int thid = blockDim.x * blockIdx.x + threadIdx.x;
+
+    // SEMAPHORE
+    acquire_semaphore((int*)lock, thid);
+    request_mem_size[thid] = size_to_alloc;
+    request_id[thid] = -1;
+    // SIGNAL update
+    atomicExch((int*)&request_signal[thid], 1);
+    __threadfence();
+    release_semaphore((int*)lock, thid);
+    // SEMAPHORE
+}
+
+__device__
+void request_recieved(volatile int* lock,
+                      volatile int* request_id,
+                      volatile int* exit_signal,
+                      volatile int** d_memory,
+                      volatile int* request_signal,
+                      int& req_id,
+                      int turn_on
+                      ){
+    int thid = blockDim.x * blockIdx.x + threadIdx.x;
+    // SEMAPHORE
+    acquire_semaphore((int*)lock, thid);
+    req_id = request_id[thid];
+    if (req_id >= 0 && turn_on && !exit_signal[0]) {
+        assert(d_memory[req_id]);
+        d_memory[req_id][0] = thid;
+    }
+    request_signal[thid] = 0;
+    __threadfence();
+    debug("app: request %d success\n", thid);
+    release_semaphore((int*)lock, thid);
+    // SEMAPHORE
+}
+
+__device__
+void mm_malloc(volatile int* exit_signal,
+            volatile int** d_memory,
+            volatile int* request_signal,
+            volatile int* request_mem_size, 
+            volatile int* request_id,
+            volatile int* lock,
+            int size_to_alloc,
+            int turn_on
+            ){
+
+    int thid = blockDim.x * blockIdx.x + threadIdx.x;
+    int req_id = -1;
+    post_request(lock, request_mem_size, request_id, request_signal, size_to_alloc);
+
+    // wait for success
+    while (!exit_signal[0]){
+        __threadfence();
+        if (request_signal[thid] == 2){
+            request_recieved(lock, request_id, exit_signal, d_memory, request_signal, req_id, turn_on);
+            break;
+        }
+    }
+}
+
 //consumer
 __global__
 void app(volatile int* exit_signal,
@@ -180,40 +249,9 @@ void app(volatile int* exit_signal,
          volatile int* lock,
          int size_to_alloc,
          int turn_on){
-    int thid = blockDim.x * blockIdx.x + threadIdx.x;
 
-    // SEMAPHORE
-    acquire_semaphore((int*)lock, thid);
-    request_mem_size[thid] = size_to_alloc;
-    request_id[thid] = -1;
-    int req_id = -1;
-    // SIGNAL update
-    atomicExch((int*)&request_signal[thid], 1);
-    __threadfence();
-    release_semaphore((int*)lock, thid);
-    // SEMAPHORE
+    mm_malloc(exit_signal, d_memory, request_signal, request_mem_size, request_id, lock, size_to_alloc, turn_on);
     
-    // wait for success
-    while (!exit_signal[0]){
-        __threadfence();
-        if (request_signal[thid] == 2){
-            
-            // SEMAPHORE
-            acquire_semaphore((int*)lock, thid);
-            req_id = request_id[thid];
-            if (req_id >= 0 && turn_on && !exit_signal[0]) {
-                assert(d_memory[req_id]);
-                d_memory[req_id][0] = thid;
-            }
-            request_signal[thid] = 0;
-            __threadfence();
-            debug("app: request %d success\n", thid);
-            release_semaphore((int*)lock, thid);
-            // SEMAPHORE
-        
-            break;
-        }
-    }
     atomicAdd((int*)&exit_counter[0], 1);
 }
 
@@ -423,10 +461,9 @@ void pmm_init(int turn_on, int size_to_alloc, size_t* ins_size, size_t num_itera
     std::cout << "\t\t#allocs\t\t" << "#sm app\t\t" << "#sm mm\t\t" << 
                 "#req per sec\t\t" << "app finish sync\n";
 
-    for (int app_grid_size = 1; app_grid_size < SMs; ++app_grid_size){
-    //for (int app_grid_size = 31; app_grid_size < SMs; ++app_grid_size){
+    //for (int app_grid_size = 1; app_grid_size < SMs; ++app_grid_size){
 
-        //int app_grid_size = SMs - mm_grid_size;
+        int app_grid_size = 33;
         int mm_grid_size = SMs - app_grid_size;
         int requests_num{app_grid_size*block_size};
 
@@ -548,7 +585,7 @@ void pmm_init(int turn_on, int size_to_alloc, size_t* ins_size, size_t num_itera
 
         printf("\t\t%d\t\t| %d\t\t| %d\t\t| %.2lf\t\t| %.2lf\n", requests_num, 
             app_grid_size, mm_grid_size, uni_req_num[app_grid_size - 1], total_sync_time.mean_);
-    }
+    //}
 
     GUARD_CU(cudaStreamSynchronize(mm_stream));
     GUARD_CU(cudaStreamSynchronize(app_stream));
