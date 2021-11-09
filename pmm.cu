@@ -103,26 +103,79 @@ void mem_free_perf(volatile int** d_memory,
 #endif
     }
 }
+
+
+__device__
+void _request_processing(
+        int request_id, 
+        volatile int* exit_signal,
+        volatile int* request_signal,
+        volatile int* request_iter,
+        volatile int* request_ids, 
+        
+#ifdef OUROBOROS__
+        MemoryManagerType* mm, 
+#else 
+#ifdef HALLOC__
+        MemoryManagerType mm, 
+#endif
+#endif
+        volatile int** d_memory,
+        volatile int* request_mem_size,
+        volatile int* lock, 
+        int turn_on
+        ){
+
+    // SEMAPHORE
+    acquire_semaphore((int*)lock, request_id);
+    debug("mm: request recieved %d\n", request_id); 
+    int req_id = atomicAdd((int*)&request_iter[0], 1);
+    request_ids[request_id] = req_id;
+
+    if (turn_on){
+        
+        d_memory[req_id] = reinterpret_cast<volatile int*>
+#ifdef HALLOC__
+            (mm.malloc(request_mem_size[request_id]));
+#else
+#ifdef OUROBOROS__
+        (mm->malloc(request_mem_size[request_id]));
+#endif
+#endif
+        __threadfence();
+        if (!exit_signal[0]){
+            if (!d_memory[req_id]){
+                printf("request failed\n");
+                assert(d_memory[req_id]);
+            }
+        }
+    }
+
+    // SIGNAL update
+    atomicExch((int*)&request_signal[request_id], 2);
+
+    release_semaphore((int*)lock, request_id);
+    // SEMAPHORE
+}
+
 //producer
 __global__
 void mem_manager(volatile int* exit_signal, 
-                volatile int* requests_number, 
-                volatile int* request_iter,
-                volatile int* request_signal, 
-                volatile int* request_ids, 
+        volatile int* requests_number, 
+        volatile int* request_iter,
+        volatile int* request_signal, 
+        volatile int* request_ids, 
 #ifdef OUROBOROS__
-              //OuroPQ* mm,
-              MemoryManagerType* mm, 
+        MemoryManagerType* mm, 
 #else 
-    #ifdef HALLOC__
-              //MemoryManagerHalloc mm,
-              MemoryManagerType mm, 
-    #endif
+#ifdef HALLOC__
+        MemoryManagerType mm, 
 #endif
-                volatile int** d_memory,
-                volatile int* request_mem_size,
-                volatile int* lock, 
-                int turn_on){
+#endif
+        volatile int** d_memory,
+        volatile int* request_mem_size,
+        volatile int* lock, 
+        int turn_on){
     int thid = blockIdx.x * blockDim.x + threadIdx.x;
     
     while (! exit_signal[0]){
@@ -130,39 +183,9 @@ void mem_manager(volatile int* exit_signal,
                 request_id += blockDim.x*gridDim.x){
 
             if (request_signal[request_id] == 1){
-
-                // SEMAPHORE
-                acquire_semaphore((int*)lock, request_id);
-                debug("mm: request recieved %d\n", request_id); 
-                int req_id = atomicAdd((int*)&request_iter[0], 1);
-                request_ids[request_id] = req_id;
-
-                if (turn_on){
-                    d_memory[req_id] = reinterpret_cast<volatile int*>
-#ifdef HALLOC__
-                        (mm.malloc(request_mem_size[request_id]));
-#else
-#ifdef OUROBOROS__
-                        (mm->malloc(request_mem_size[request_id]));
-#endif
-#endif
-                    __threadfence();
-                    if (!exit_signal[0]){
-                        if (!d_memory[req_id]){
-                            printf("request failed\n");
-                            //exit_signal[0] = 1;
-                            //exit(1);
-                            assert(d_memory[req_id]);
-                        }
-                    }
-                }
-
-                // SIGNAL update
-                atomicExch((int*)&request_signal[request_id], 2);
-
-                release_semaphore((int*)lock, request_id);
-                // SEMAPHORE
-
+                _request_processing(request_id, exit_signal, request_signal, 
+                                request_iter, request_ids, mm, d_memory, 
+                                request_mem_size, lock, turn_on);
                 debug("mm: request done %d\n", request_id);
             }
         }
@@ -215,14 +238,14 @@ void request_recieved(volatile int* lock,
 
 __device__
 void mm_malloc(volatile int* exit_signal,
-            volatile int** d_memory,
-            volatile int* request_signal,
-            volatile int* request_mem_size, 
-            volatile int* request_id,
-            volatile int* lock,
-            int size_to_alloc,
-            int turn_on
-            ){
+        volatile int** d_memory,
+        volatile int* request_signal,
+        volatile int* request_mem_size, 
+        volatile int* request_id,
+        volatile int* lock,
+        int size_to_alloc,
+        int turn_on
+        ){
 
     int thid = blockDim.x * blockIdx.x + threadIdx.x;
     int req_id = -1;
@@ -241,14 +264,14 @@ void mm_malloc(volatile int* exit_signal,
 //consumer
 __global__
 void app(volatile int* exit_signal,
-         volatile int** d_memory, 
-         volatile int* request_signal, 
-         volatile int* request_mem_size,
-         volatile int* request_id, 
-         volatile int* exit_counter, 
-         volatile int* lock,
-         int size_to_alloc,
-         int turn_on){
+        volatile int** d_memory, 
+        volatile int* request_signal, 
+        volatile int* request_mem_size,
+        volatile int* request_id, 
+        volatile int* exit_counter, 
+        volatile int* lock,
+        int size_to_alloc,
+        int turn_on){
 
     mm_malloc(exit_signal, d_memory, request_signal, request_mem_size, request_id, lock, size_to_alloc, turn_on);
     
