@@ -59,6 +59,7 @@ void RequestType::init(size_t Size){
 
 void RequestType::free(){
 
+    GUARD_CU(cudaDeviceSynchronize());
     GUARD_CU(cudaPeekAtLastError());
     GUARD_CU(cudaFree((void*)requests_number));
     GUARD_CU(cudaPeekAtLastError());
@@ -104,38 +105,23 @@ void copy(int** d_memory0, int* d_memory, int size){
     d_memory[thid] = d_memory0[thid][0];
 }
 //mem test
-void mem_test(int** d_memory0, int requests_num, int blocks, int threads, 
-                cudaStream_t& mm_stream){
+void mem_test(int** d_memory0, int requests_num, int blocks, int threads){
     //create array
     int* d_memory{nullptr};
     cudaError_t retval;
-    retval = cudaMalloc(&d_memory, sizeof(int) * requests_num);
-    if (retval){
-        printf("malloc does not work %d\n", retval);
-    }
-    retval = cudaDeviceSynchronize();
-    if (retval){
-        printf("sync does not work\n");
-    }
-    copy<<<blocks, threads, 0, mm_stream>>>(d_memory0, d_memory, requests_num);
-    retval = cudaDeviceSynchronize();
-    if (retval){
-        printf("sync does not work\n");
-    }
+    GUARD_CU(cudaMalloc(&d_memory, sizeof(int) * requests_num));
+    GUARD_CU(cudaPeekAtLastError());
+    GUARD_CU(cudaDeviceSynchronize());
+    GUARD_CU(cudaPeekAtLastError());
+    copy<<<blocks, threads>>>(d_memory0, d_memory, requests_num);
+    GUARD_CU(cudaPeekAtLastError());
+    GUARD_CU(cudaDeviceSynchronize());
+    GUARD_CU(cudaPeekAtLastError());
     int* h_memory = (int*)malloc(requests_num* sizeof(int));
-    retval = cudaMemcpy(h_memory, d_memory, sizeof(int)*requests_num, cudaMemcpyDeviceToHost);
-    if (retval){
-        printf("memcpy does not work\n");
-    }
-    retval = cudaDeviceSynchronize();
-    if (retval){
-        printf("sync does not work\n");
-    }
-    /*for (int i=0; i< requests_num; ++i){
-        if (h_memory[i] != i){//1234321){//i){
-            printf("h_memory[%d] = %d != %d\n", i, h_memory[i], i);
-        }
-    }*/
+    GUARD_CU(cudaMemcpy(h_memory, d_memory, sizeof(int)*requests_num, cudaMemcpyDeviceToHost));
+    GUARD_CU(cudaPeekAtLastError());
+    GUARD_CU(cudaDeviceSynchronize());
+    GUARD_CU(cudaPeekAtLastError());
 }
 
 

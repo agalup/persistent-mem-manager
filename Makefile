@@ -3,11 +3,11 @@ EXEC = main
 $(EXEC):
  
 #OUROBOROS
-	nvcc -G -g -arch=sm_75 --resource-usage -Xptxas --warn-on-spills --maxrregcount 32 \
+	nvcc -G -g -arch=sm_70 --resource-usage -Xptxas --warn-on-spills --maxrregcount 32 \
     --expt-relaxed-constexpr -I include -I Ouroboros_origin/include -DOUROBOROS__ main.cu \
     -o ouroboros_mm
 	
-	nvcc -G -g -arch=sm_75 --resource-usage -Xptxas --warn-on-spills --maxrregcount 32 \
+	nvcc -G -g -arch=sm_70 --resource-usage -Xptxas --warn-on-spills --maxrregcount 32 \
     --expt-relaxed-constexpr -I include -I Ouroboros_origin/include -DOUROBOROS__ \
     --compiler-options '-fPIC' -Xcompiler --shared pmm.cu -o ouroboros_mm.so 
  
