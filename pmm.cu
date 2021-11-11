@@ -20,13 +20,6 @@ using namespace std;
 #define debug(a...)
 #endif
 
-/*
-#ifndef HALLOC__
-    #ifndef OUROBOROS__
-        #define OUROBOROS__
-    #endif
-#endif*/
-
 #ifdef HALLOC__
 #include "Instance.cuh"
 #endif
@@ -43,47 +36,22 @@ extern "C"{
 #endif
 
 __global__
-void mem_free(volatile int** d_memory, 
-              volatile int* request_id, 
-#ifdef OUROBOROS__
-              //OuroPQ* mm,
-              MemoryManagerType* mm, 
-#else 
-    #ifdef HALLOC__
-              //MemoryManagerHalloc mm,
-              MemoryManagerType mm, 
-    #endif
-#endif
-              volatile int* requests_num
+    void mem_free(volatile int** d_memory, 
+            volatile int* request_id, 
+            MemoryManagerType* mm, 
+            volatile int* requests_num
         ){
     int thid = blockDim.x * blockIdx.x + threadIdx.x;
     if (thid >= requests_num[0]){
         return;
     }
-#ifdef OUROBOROS__
     if (request_id[thid] > -1)
         mm->free((void*)d_memory[thid]);
-#else 
-    #ifdef HALLOC__
-    assert(request_id);
-    assert(d_memory);
-    if (request_id[thid] > -1 && d_memory[thid]){
-        assert(d_memory[thid]);
-        mm.free((void*)d_memory[thid]);
-    }
-    #endif
-#endif
 }
 
 __global__
 void mem_free_perf(volatile int** d_memory, 
-#ifdef OUROBOROS__
-              MemoryManagerType* mm, 
-#else 
-    #ifdef HALLOC__
-              MemoryManagerType mm, 
-    #endif
-#endif
+              MemoryManagerType* mm,
               int requests_num, 
               int turn_on
         ){
@@ -92,15 +60,8 @@ void mem_free_perf(volatile int** d_memory,
         return;
     }
     if (turn_on){
-#ifdef OUROBOROS__
             if (d_memory[thid])
                 mm->free((void*)d_memory[thid]);
-#else 
-    #ifdef HALLOC__
-            if (d_memory[thid])
-                mm.free((void*)d_memory[thid]);
-    #endif
-#endif
     }
 }
 
@@ -112,14 +73,7 @@ void _request_processing(
         volatile int* request_signal,
         volatile int* request_iter,
         volatile int* request_ids, 
-        
-#ifdef OUROBOROS__
         MemoryManagerType* mm, 
-#else 
-#ifdef HALLOC__
-        MemoryManagerType mm, 
-#endif
-#endif
         volatile int** d_memory,
         volatile int* request_mem_size,
         volatile int* lock, 
@@ -135,13 +89,7 @@ void _request_processing(
     if (turn_on){
         
         d_memory[req_id] = reinterpret_cast<volatile int*>
-#ifdef HALLOC__
-            (mm.malloc(request_mem_size[request_id]));
-#else
-#ifdef OUROBOROS__
-        (mm->malloc(request_mem_size[request_id]));
-#endif
-#endif
+            (mm->malloc(request_mem_size[request_id]));
         __threadfence();
         if (!exit_signal[0]){
             if (!d_memory[req_id]){
@@ -165,13 +113,7 @@ void mem_manager(volatile int* exit_signal,
         volatile int* request_iter,
         volatile int* request_signal, 
         volatile int* request_ids, 
-#ifdef OUROBOROS__
         MemoryManagerType* mm, 
-#else 
-#ifdef HALLOC__
-        MemoryManagerType mm, 
-#endif
-#endif
         volatile int** d_memory,
         volatile int* request_mem_size,
         volatile int* lock, 
@@ -183,9 +125,10 @@ void mem_manager(volatile int* exit_signal,
                 request_id += blockDim.x*gridDim.x){
 
             if (request_signal[request_id] == 1){
-                _request_processing(request_id, exit_signal, request_signal, 
-                                request_iter, request_ids, mm, d_memory, 
+                _request_processing(request_id, exit_signal, 
+                                request_signal, request_iter, request_ids, mm, d_memory, 
                                 request_mem_size, lock, turn_on);
+                assert(d_memory[request_ids[request_id]]);
                 debug("mm: request done %d\n", request_id);
             }
         }
@@ -213,7 +156,7 @@ void post_request(volatile int* lock,
 }
 
 __device__
-void request_recieved(volatile int* lock,
+void mem_recieved(volatile int* lock,
                       volatile int* request_id,
                       volatile int* exit_signal,
                       volatile int** d_memory,
@@ -255,7 +198,7 @@ void mm_malloc(volatile int* exit_signal,
     while (!exit_signal[0]){
         __threadfence();
         if (request_signal[thid] == 2){
-            request_recieved(lock, request_id, exit_signal, d_memory, request_signal, req_id, turn_on);
+            mem_recieved(lock, request_id, exit_signal, d_memory, request_signal, req_id, turn_on);
             break;
         }
     }
@@ -273,7 +216,11 @@ void app(volatile int* exit_signal,
         int size_to_alloc,
         int turn_on){
 
+    int thid = blockDim.x * blockIdx.x + threadIdx.x;
     mm_malloc(exit_signal, d_memory, request_signal, request_mem_size, request_id, lock, size_to_alloc, turn_on);
+
+    assert(d_memory[request_id[thid]][0] == thid);
+    
     
     atomicAdd((int*)&exit_counter[0], 1);
 }
@@ -281,15 +228,7 @@ void app(volatile int* exit_signal,
 __global__
 void simple_alloc(volatile int** d_memory, 
         volatile int* exit_counter,
-#ifdef OUROBOROS__
-        //OuroPQ* mm,
         MemoryManagerType* mm, 
-#else 
-#ifdef HALLOC__
-        //MemoryManagerHalloc mm,
-        MemoryManagerType mm, 
-#endif
-#endif
         int size_to_alloc,
         int turn_on
         ){
@@ -297,13 +236,7 @@ void simple_alloc(volatile int** d_memory,
     int thid = blockDim.x * blockIdx.x + threadIdx.x;
     if (turn_on){
         d_memory[thid] = reinterpret_cast<volatile int*>
-#ifdef HALLOC__
-            (mm.malloc(size_to_alloc));
-#else
-#ifdef OUROBOROS__
-        (mm->malloc(size_to_alloc));
-#endif
-#endif
+            (mm->malloc(size_to_alloc));
     }
     atomicAdd((int*)&exit_counter[0], 1);
 }
@@ -361,7 +294,7 @@ void perf_alloc(int size_to_alloc, size_t* ins_size, size_t num_iterations,
                     memory_manager.getDeviceMemoryManager(),
 #else
 #ifdef HALLOC__
-                    memory_manager,
+                    &memory_manager,
 #endif
 #endif                   
                     size_to_alloc, 
