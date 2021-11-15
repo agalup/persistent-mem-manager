@@ -111,16 +111,12 @@ void mem_test(int** d_memory0, int requests_num, int blocks, int threads){
     cudaError_t retval;
     GUARD_CU(cudaMalloc(&d_memory, sizeof(int) * requests_num));
     GUARD_CU(cudaPeekAtLastError());
-    GUARD_CU(cudaDeviceSynchronize());
-    GUARD_CU(cudaPeekAtLastError());
     copy<<<blocks, threads>>>(d_memory0, d_memory, requests_num);
-    GUARD_CU(cudaPeekAtLastError());
-    GUARD_CU(cudaDeviceSynchronize());
+    GUARD_CU(cudaStreamSynchronize(0));
     GUARD_CU(cudaPeekAtLastError());
     int* h_memory = (int*)malloc(requests_num* sizeof(int));
     GUARD_CU(cudaMemcpy(h_memory, d_memory, sizeof(int)*requests_num, cudaMemcpyDeviceToHost));
-    GUARD_CU(cudaPeekAtLastError());
-    GUARD_CU(cudaDeviceSynchronize());
+    GUARD_CU(cudaStreamSynchronize(0));
     GUARD_CU(cudaPeekAtLastError());
 }
 
