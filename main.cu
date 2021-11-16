@@ -30,19 +30,19 @@ int main(int argc, char *argv[]){
     printf("instant size %ld\n", instant_size);
     int size = SMs - 1;
 
-    int* sm_app            = (int*)malloc(sizeof(int)*size);
-    int* sm_mm             = (int*)malloc(sizeof(int)*size);
-    int* allocs_size       = (int*)malloc(sizeof(int)*size);
-    float* app_launch      = (float*)malloc(sizeof(float)*size);
-    float* app_finish      = (float*)malloc(sizeof(float)*size);
-    float* app_sync_pmm    = (float*)malloc(sizeof(float)*size);
-    float* uni_req_num_pmm = (float*)malloc(sizeof(float)*size);
-    float* app_sync        = (float*)malloc(sizeof(float)*size);
-    float* uni_req_num     = (float*)malloc(sizeof(float)*size);
+    int* sm_app             = (int*)malloc(sizeof(int)*size);
+    int* sm_mm              = (int*)malloc(sizeof(int)*size);
+    int* allocs_size        = (int*)malloc(sizeof(int)*size);
+    float* malloc_sync      = (float*)malloc(sizeof(float)*size);
+    float* malloc_per_sec   = (float*)malloc(sizeof(float)*size);
+    float* free_sync        = (float*)malloc(sizeof(float)*size);
+    float* free_per_sec     = (float*)malloc(sizeof(float)*size);
+    //float* app_sync        = (float*)malloc(sizeof(float)*size);
+    //float* uni_req_num     = (float*)malloc(sizeof(float)*size);
     
     pmm_init(turn_on, size_to_alloc, &instant_size, iteration_num, SMs, 
-            sm_app, sm_mm, allocs_size, app_launch, app_finish, 
-            app_sync_pmm, uni_req_num_pmm);
+            sm_app, sm_mm, allocs_size, malloc_sync, malloc_per_sec, 
+            free_sync, free_per_sec);
 
     GUARD_CU(cudaDeviceReset());
     GUARD_CU(cudaPeekAtLastError());

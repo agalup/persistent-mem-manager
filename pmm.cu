@@ -193,12 +193,20 @@ void request_processed(request_type type,
     int thid = blockDim.x * blockIdx.x + threadIdx.x;
     // SEMAPHORE
     acquire_semaphore((int*)lock, thid);
-    if (type == MALLOC){
-        req_id = request_id[thid];
-        if (req_id >= 0 && turn_on && !exit_signal[0]) {
-            assert(d_memory[req_id]);
-            d_memory[req_id][0] = thid;
-        }
+    switch (type){
+        case MALLOC:
+            req_id = request_id[thid];
+            if (req_id >= 0 && turn_on && !exit_signal[0]) {
+                assert(d_memory[req_id]);
+                d_memory[req_id][0] = thid;
+            }
+            break;
+        case FREE:
+            d_memory[request_id[thid]] = nullptr;
+            break;
+        default:
+            printf("error\n");
+            break;
     }
     request_signal[thid] = request_empty;
     __threadfence();
@@ -259,7 +267,7 @@ void mm_malloc(volatile int* exit_signal,
 
 //consumer
 __global__
-void app(volatile int* exit_signal,
+void malloc_app_test(volatile int* exit_signal,
         volatile int** d_memory, 
         volatile int* request_signal, 
         volatile int* request_mem_size,
@@ -280,7 +288,7 @@ void app(volatile int* exit_signal,
 
 //consumer2
 __global__
-void app_free(volatile int* exit_signal, 
+void free_app_test(volatile int* exit_signal, 
               volatile int** d_memory, 
               volatile int* request_signal, 
               volatile int* request_mem_size,
@@ -294,7 +302,7 @@ void app_free(volatile int* exit_signal,
     
     mm_free(exit_signal, d_memory, request_signal, request_mem_size, request_id, lock, size_to_alloc, turn_on);
 
-    //kassert(d_memory[request_id[thid]] == nullptr);
+    assert(d_memory[request_id[thid]] == nullptr);
     
     atomicAdd((int*)&exit_counter[0], 1);
 }
@@ -449,16 +457,15 @@ void perf_alloc(int size_to_alloc, size_t* ins_size, size_t num_iterations,
     GUARD_CU(cudaPeekAtLastError());
 }
 
-void check_results(int* exit_signal, 
+void check_persistent_kernel_results(int* exit_signal, 
                    int* exit_counter, 
                    int block_size, 
                    int app_grid_size, 
-                   PerfMeasure& timing_total, 
                    cudaStream_t& app_stream,
-                   PerfMeasure& timing_total_sync, 
                    int turn_on, 
                    RequestType& requests, 
-                   int requests_num){
+                   int requests_num,
+                   bool& finish){
 
     // Check results
     int old_counter = -1;
@@ -470,24 +477,9 @@ void check_results(int* exit_signal,
     while (iter2 < time_limit){
         // Check if all allocations are done
         if (exit_counter[0] == block_size*app_grid_size){
-            //printf("allocations are done\n");
-            timing_total.stopMeasurement();
-            //*exit_signal = 1;
-            //GUARD_CU(cudaDeviceSynchronize());
             GUARD_CU(cudaStreamSynchronize(app_stream));
             GUARD_CU(cudaPeekAtLastError());
-            timing_total_sync.stopMeasurement();
-            if (turn_on){
-                test1<<<app_grid_size, block_size>>>(requests.d_memory);
-                //GUARD_CU(cudaDeviceSynchronize());
-                GUARD_CU(cudaStreamSynchronize(app_stream));
-                GUARD_CU(cudaPeekAtLastError());
-                mem_test((int**)requests.d_memory, requests_num, app_grid_size, block_size);
-                //GUARD_CU(cudaDeviceSynchronize());
-                GUARD_CU(cudaStreamSynchronize(app_stream));
-                GUARD_CU(cudaPeekAtLastError());
-            }
-            //printf("break!\n");
+            finish = true;
             break;
         }else{
             if (exit_counter[0] != old_counter){
@@ -495,7 +487,6 @@ void check_results(int* exit_signal,
                 ++iter;
                 iter_mean += iter2;
                 iter2 = 0;
-                //if (iter%1000 == 0){}
             }
             ++iter2;
         }
@@ -507,22 +498,13 @@ void check_results(int* exit_signal,
             GUARD_CU(cudaPeekAtLastError());
         }
     }
-    if (iter != 0)
-        iter_mean /= iter;
 
-    //GUARD_CU(cudaDeviceSynchronize());
     GUARD_CU(cudaPeekAtLastError());
-    /*if (! *exit_signal){
-        //Test only:
-        *exit_signal = 1;
-        GUARD_CU(cudaDeviceSynchronize());
-        GUARD_CU(cudaPeekAtLastError());
-    }*/
 }
 
 void pmm_init(int turn_on, int size_to_alloc, size_t* ins_size, size_t num_iterations, 
-            int SMs, int* sm_app, int* sm_mm, int* allocs, float* app_launch, 
-            float* app_finish, float* app_sync, float* uni_req_num){
+            int SMs, int* sm_app, int* sm_mm, int* allocs, float* malloc_sync, 
+            float* malloc_per_sec, float* free_sync, float* free_per_sec){
 
     auto instant_size = *ins_size;
 
@@ -560,7 +542,7 @@ void pmm_init(int turn_on, int size_to_alloc, size_t* ins_size, size_t num_itera
     printf("size to alloc per thread %d, num iterations %d, instantsize %ld\n", 
                 size_to_alloc, num_iterations, instant_size);
     std::cout << "\t\t#allocs\t\t" << "#sm app\t\t" << "#sm mm\t\t" << 
-                "#req per sec\t\t" << "app finish sync\n";
+                "#malloc req per sec\t" << "malloc\t\t" << "#free req per sec\t" << "free\n";
 
     for (int app_grid_size = 1; app_grid_size < SMs; ++app_grid_size){
 
@@ -574,7 +556,7 @@ void pmm_init(int turn_on, int size_to_alloc, size_t* ins_size, size_t num_itera
         allocs[app_grid_size - 1] = requests_num;
 
         //Timing variables
-        PerfMeasure timing_app, timing_mm, timing_total, timing_total_sync;
+        PerfMeasure timing_malloc_app, timing_free_app, timing_mm, malloc_total_sync, free_total_sync;
 
         for (int iteration = 0; iteration < num_iterations; ++iteration){
 
@@ -600,46 +582,30 @@ void pmm_init(int turn_on, int size_to_alloc, size_t* ins_size, size_t num_itera
             GUARD_CU(cudaPeekAtLastError());
 
             // Run application
-            timing_app.startMeasurement();
-            timing_total.startMeasurement();
-            timing_total_sync.startMeasurement();
-            app<<<app_grid_size, block_size, 0, app_stream>>>(exit_signal, requests.d_memory, 
+            timing_malloc_app.startMeasurement();
+            malloc_total_sync.startMeasurement();
+            malloc_app_test<<<app_grid_size, block_size, 0, app_stream>>>(exit_signal, requests.d_memory, 
                     requests.request_signal, requests.request_mem_size, requests.request_id, 
                     exit_counter, requests.lock, size_to_alloc, turn_on);
-            timing_app.stopMeasurement();
+            timing_malloc_app.stopMeasurement();
             GUARD_CU(cudaPeekAtLastError());
 
+            bool kernel_complete = false;
             // Check resutls: test
-            check_results(exit_signal, exit_counter, block_size, app_grid_size, timing_total, app_stream,
-                        timing_total_sync, turn_on, requests, requests_num);
+            check_persistent_kernel_results(exit_signal, exit_counter, block_size, app_grid_size, app_stream,
+                        turn_on, requests, requests_num, kernel_complete);
 
-            GUARD_CU(cudaStreamSynchronize(app_stream));
-            GUARD_CU(cudaPeekAtLastError());
+            malloc_total_sync.stopMeasurement();
 
-            //*exit_signal = 1;
-
-            if (! *exit_signal){
-                *exit_counter = 0;
-                app_free<<<app_grid_size, block_size, 0, app_stream>>>(exit_signal, requests.d_memory, 
-                        requests.request_signal, requests.request_mem_size, requests.request_id, 
-                        exit_counter, requests.lock, size_to_alloc, turn_on);
-                GUARD_CU(cudaPeekAtLastError());
-                GUARD_CU(cudaStreamSynchronize(app_stream));
-                GUARD_CU(cudaPeekAtLastError());
-                long long iter = 0;
-                while (exit_counter[0] != block_size*app_grid_size){
-                    ++iter;
-                    if (iter % 100000 == 0){
-                        printf(".");
-                    }
-                };
-                *exit_signal = 1;
-                GUARD_CU(cudaPeekAtLastError());
-                GUARD_CU(cudaDeviceSynchronize());
-                GUARD_CU(cudaPeekAtLastError());
-                requests.free();
-                GUARD_CU(cudaDeviceSynchronize());
-                GUARD_CU(cudaPeekAtLastError());
+            if (kernel_complete){
+                if (turn_on){
+                    test1<<<app_grid_size, block_size>>>(requests.d_memory);
+                    GUARD_CU(cudaStreamSynchronize(app_stream));
+                    GUARD_CU(cudaPeekAtLastError());
+                    mem_test((int**)requests.d_memory, requests_num, app_grid_size, block_size);
+                    GUARD_CU(cudaStreamSynchronize(app_stream));
+                    GUARD_CU(cudaPeekAtLastError());
+                }
             }else{
                 // Deallocate device memory
                 mem_free<<<app_grid_size, block_size>>>(requests.d_memory, requests.request_id, 
@@ -652,27 +618,55 @@ void pmm_init(int turn_on, int size_to_alloc, size_t* ins_size, size_t num_itera
 #endif
                         requests.requests_number);
 
-
                 GUARD_CU(cudaPeekAtLastError());
                 GUARD_CU(cudaDeviceSynchronize());
                 GUARD_CU(cudaPeekAtLastError());
                 requests.free();
                 GUARD_CU(cudaDeviceSynchronize());
                 GUARD_CU(cudaPeekAtLastError());
+                continue;
             }
+
+            *exit_counter = 0;
+                
+            timing_free_app.startMeasurement();
+            free_total_sync.startMeasurement();
+            free_app_test<<<app_grid_size, block_size, 0, app_stream>>>(exit_signal, requests.d_memory, 
+                    requests.request_signal, requests.request_mem_size, requests.request_id, 
+                    exit_counter, requests.lock, size_to_alloc, turn_on);
+            timing_free_app.stopMeasurement();
+            GUARD_CU(cudaPeekAtLastError());
+
+            kernel_complete = false;
+            // Check resutls: test
+            check_persistent_kernel_results(exit_signal, exit_counter, block_size, app_grid_size, app_stream,
+                        turn_on, requests, requests_num, kernel_complete);
+
+            *exit_signal = 1;
+            GUARD_CU(cudaPeekAtLastError());
+            GUARD_CU(cudaDeviceSynchronize());
+            GUARD_CU(cudaPeekAtLastError());
+            requests.free();
+            GUARD_CU(cudaDeviceSynchronize());
+            GUARD_CU(cudaPeekAtLastError());
+            free_total_sync.stopMeasurement();
+        
         }
         // Output
-        auto app_time = timing_app.generateResult();
-        auto total_time = timing_total.generateResult();
-        auto total_sync_time = timing_total_sync.generateResult();
-        app_launch[app_grid_size - 1] = (app_time.mean_);
-        app_finish[app_grid_size - 1] = (total_time.mean_);
-        app_sync  [app_grid_size - 1] = (total_sync_time.mean_);
-        // The number of requests done per a second
-        uni_req_num[app_grid_size - 1] = (requests_num * 1000.0)/total_sync_time.mean_;
+        auto malloc_time            = timing_malloc_app.generateResult();
+        auto free_time              = timing_free_app.generateResult();
+        auto malloc_total_sync_time = malloc_total_sync.generateResult();
+        auto free_total_sync_time   = free_total_sync.generateResult();
 
-        printf("\t\t%d\t\t| %d\t\t| %d\t\t| %.2lf\t\t| %.2lf\n", requests_num, 
-            app_grid_size, mm_grid_size, uni_req_num[app_grid_size - 1], total_sync_time.mean_);
+        malloc_sync[app_grid_size - 1]      = (malloc_total_sync_time.mean_);
+        free_sync[app_grid_size - 1]        = (free_total_sync_time.mean_);
+        // The number of requests done per a second
+        malloc_per_sec[app_grid_size - 1]   = (requests_num * 1000.0)/malloc_total_sync_time.mean_;
+        free_per_sec[app_grid_size - 1]     = (requests_num * 1000.0)/free_total_sync_time.mean_;
+
+        printf("\t\t%d\t\t| %d\t\t| %d\t\t| %.2lf\t\t| %.2lf\t\t| %.2lf\t\t | %.2lf\n", requests_num, 
+            app_grid_size, mm_grid_size, malloc_per_sec[app_grid_size - 1], malloc_total_sync_time.mean_,
+            free_per_sec[app_grid_size - 1], free_total_sync_time.mean_);
     }
 
     GUARD_CU(cudaStreamSynchronize(mm_stream));
