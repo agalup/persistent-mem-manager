@@ -34,10 +34,18 @@ extern "C"{
     //Halloc initialization
     #define MemoryManagerType MemoryManagerHalloc
 #endif
-/*
-__device__
-void mm_free(){
-}*/
+
+#define EMPTY       0
+#define DONE        2
+#define MALLOC      3
+#define FREE        5
+
+enum request_type {
+    request_empty       = EMPTY,
+    request_done        = DONE,
+    request_malloc      = MALLOC, 
+    request_free        = FREE
+};
 
 __global__
     void mem_free(volatile int** d_memory, 
@@ -48,7 +56,6 @@ __global__
     if (thid >= requests_num[0]){
         return;
     }
-    //mm_free(d_memory, request_id, thid);
     if (request_id[thid] > -1)
         mm->free((void*)d_memory[thid]);
 }
@@ -69,7 +76,6 @@ void mem_free_perf(volatile int** d_memory,
     }
 }
 
-
 __device__
 void _request_processing(
         int request_id, 
@@ -87,24 +93,37 @@ void _request_processing(
     // SEMAPHORE
     acquire_semaphore((int*)lock, request_id);
     debug("mm: request recieved %d\n", request_id); 
-    int req_id = atomicAdd((int*)&request_iter[0], 1);
-    request_ids[request_id] = req_id;
-
+    
     if (turn_on){
-        
-        d_memory[req_id] = reinterpret_cast<volatile int*>
-            (mm->malloc(request_mem_size[request_id]));
-        __threadfence();
-        if (!exit_signal[0]){
-            if (!d_memory[req_id]){
-                printf("request failed\n");
-                assert(d_memory[req_id]);
-            }
+        switch (request_signal[request_id]){
+
+            case MALLOC:
+                int req_id = atomicAdd((int*)&request_iter[0], 1);
+                request_ids[request_id] = req_id;
+                d_memory[req_id] = reinterpret_cast<volatile int*>
+                    (mm->malloc(request_mem_size[request_id]));
+                __threadfence();
+                if (!exit_signal[0]){
+                    if (!d_memory[req_id]){
+                        printf("request failed\n");
+                        assert(d_memory[req_id]);
+                    }
+                }
+                break;
+
+            case FREE:
+                assert(d_memory[request_ids[request_id]]);
+                mm->free((void*)d_memory[request_ids[request_id]]);
+                __threadfence();
+                break;
+
+            default:
+                printf("request processing fail\n");
         }
     }
 
     // SIGNAL update
-    atomicExch((int*)&request_signal[request_id], 2);
+    atomicExch((int*)&request_signal[request_id], request_done);
 
     release_semaphore((int*)lock, request_id);
     // SEMAPHORE
@@ -128,19 +147,19 @@ void mem_manager(volatile int* exit_signal,
         for (int request_id=thid; !exit_signal[0] && request_id<requests_number[0]; 
                 request_id += blockDim.x*gridDim.x){
 
-            if (request_signal[request_id] == 1){
-                _request_processing(request_id, exit_signal, 
-                                request_signal, request_iter, request_ids, mm, d_memory, 
-                                request_mem_size, lock, turn_on);
-                assert(d_memory[request_ids[request_id]]);
-                debug("mm: request done %d\n", request_id);
+            if (request_signal[request_id] == MALLOC or request_signal[request_id] == FREE){
+                _request_processing(request_id, exit_signal, request_signal, request_iter, 
+                                    request_ids, mm, d_memory, request_mem_size, lock, turn_on);
+            
+            debug("mm: request done %d\n", request_id);
             }
         }
     }
 }
 
 __device__
-void post_request(volatile int* lock,
+void post_request(request_type type, 
+                  volatile int* lock,
                   volatile int* request_mem_size,
                   volatile int* request_id,
                   volatile int* request_signal,
@@ -150,17 +169,20 @@ void post_request(volatile int* lock,
 
     // SEMAPHORE
     acquire_semaphore((int*)lock, thid);
-    request_mem_size[thid] = size_to_alloc;
-    request_id[thid] = -1;
+    if (type == MALLOC){
+        request_mem_size[thid] = size_to_alloc;
+        request_id[thid] = -1;
+    }
     // SIGNAL update
-    atomicExch((int*)&request_signal[thid], 1);
+    atomicExch((int*)&request_signal[thid], type);
     __threadfence();
     release_semaphore((int*)lock, thid);
     // SEMAPHORE
 }
 
 __device__
-void mem_recieved(volatile int* lock,
+void request_processed(request_type type,
+                      volatile int* lock,
                       volatile int* request_id,
                       volatile int* exit_signal,
                       volatile int** d_memory,
@@ -171,16 +193,43 @@ void mem_recieved(volatile int* lock,
     int thid = blockDim.x * blockIdx.x + threadIdx.x;
     // SEMAPHORE
     acquire_semaphore((int*)lock, thid);
-    req_id = request_id[thid];
-    if (req_id >= 0 && turn_on && !exit_signal[0]) {
-        assert(d_memory[req_id]);
-        d_memory[req_id][0] = thid;
+    if (type == MALLOC){
+        req_id = request_id[thid];
+        if (req_id >= 0 && turn_on && !exit_signal[0]) {
+            assert(d_memory[req_id]);
+            d_memory[req_id][0] = thid;
+        }
     }
-    request_signal[thid] = 0;
+    request_signal[thid] = request_empty;
     __threadfence();
     debug("app: request %d success\n", thid);
     release_semaphore((int*)lock, thid);
     // SEMAPHORE
+}
+
+__device__
+void mm_free(volatile int* exit_signal,
+        volatile int** d_memory,
+        volatile int* request_signal,
+        volatile int* request_mem_size, 
+        volatile int* request_id,
+        volatile int* lock,
+        int size_to_alloc,
+        int turn_on
+        ){
+    int thid = blockDim.x * blockIdx.x + threadIdx.x;
+    int req_id = -1;
+    post_request((request_type)FREE, lock, request_mem_size, request_id, request_signal, size_to_alloc);
+
+    // wait for success
+    while (!exit_signal[0]){
+        __threadfence();
+        if (request_signal[thid] == request_done){
+            request_processed((request_type)FREE, lock, request_id, exit_signal, d_memory, request_signal, req_id, turn_on);
+            break;
+        }
+    }
+
 }
 
 __device__
@@ -196,13 +245,13 @@ void mm_malloc(volatile int* exit_signal,
 
     int thid = blockDim.x * blockIdx.x + threadIdx.x;
     int req_id = -1;
-    post_request(lock, request_mem_size, request_id, request_signal, size_to_alloc);
+    post_request((request_type)MALLOC, lock, request_mem_size, request_id, request_signal, size_to_alloc);
 
     // wait for success
     while (!exit_signal[0]){
         __threadfence();
-        if (request_signal[thid] == 2){
-            mem_recieved(lock, request_id, exit_signal, d_memory, request_signal, req_id, turn_on);
+        if (request_signal[thid] == request_done){
+            request_processed((request_type)MALLOC, lock, request_id, exit_signal, d_memory, request_signal, req_id, turn_on);
             break;
         }
     }
@@ -225,6 +274,27 @@ void app(volatile int* exit_signal,
     mm_malloc(exit_signal, d_memory, request_signal, request_mem_size, request_id, lock, size_to_alloc, turn_on);
 
     assert(d_memory[request_id[thid]][0] == thid);
+    
+    atomicAdd((int*)&exit_counter[0], 1);
+}
+
+//consumer2
+__global__
+void app_free(volatile int* exit_signal, 
+              volatile int** d_memory, 
+              volatile int* request_signal, 
+              volatile int* request_mem_size,
+              volatile int* request_id, 
+              volatile int* exit_counter, 
+              volatile int* lock,
+              int size_to_alloc,
+              int turn_on){
+    
+    int thid = blockDim.x * blockIdx.x + threadIdx.x;
+    
+    mm_free(exit_signal, d_memory, request_signal, request_mem_size, request_id, lock, size_to_alloc, turn_on);
+
+    //kassert(d_memory[request_id[thid]] == nullptr);
     
     atomicAdd((int*)&exit_counter[0], 1);
 }
@@ -442,12 +512,12 @@ void check_results(int* exit_signal,
 
     //GUARD_CU(cudaDeviceSynchronize());
     GUARD_CU(cudaPeekAtLastError());
-    if (! *exit_signal){
+    /*if (! *exit_signal){
         //Test only:
         *exit_signal = 1;
         GUARD_CU(cudaDeviceSynchronize());
         GUARD_CU(cudaPeekAtLastError());
-    }
+    }*/
 }
 
 void pmm_init(int turn_on, int size_to_alloc, size_t* ins_size, size_t num_iterations, 
@@ -543,7 +613,34 @@ void pmm_init(int turn_on, int size_to_alloc, size_t* ins_size, size_t num_itera
             check_results(exit_signal, exit_counter, block_size, app_grid_size, timing_total, app_stream,
                         timing_total_sync, turn_on, requests, requests_num);
 
-            if (*exit_signal){
+            GUARD_CU(cudaStreamSynchronize(app_stream));
+            GUARD_CU(cudaPeekAtLastError());
+
+            //*exit_signal = 1;
+
+            if (! *exit_signal){
+                *exit_counter = 0;
+                app_free<<<app_grid_size, block_size, 0, app_stream>>>(exit_signal, requests.d_memory, 
+                        requests.request_signal, requests.request_mem_size, requests.request_id, 
+                        exit_counter, requests.lock, size_to_alloc, turn_on);
+                GUARD_CU(cudaPeekAtLastError());
+                GUARD_CU(cudaStreamSynchronize(app_stream));
+                GUARD_CU(cudaPeekAtLastError());
+                long long iter = 0;
+                while (exit_counter[0] != block_size*app_grid_size){
+                    ++iter;
+                    if (iter % 100000 == 0){
+                        printf(".");
+                    }
+                };
+                *exit_signal = 1;
+                GUARD_CU(cudaPeekAtLastError());
+                GUARD_CU(cudaDeviceSynchronize());
+                GUARD_CU(cudaPeekAtLastError());
+                requests.free();
+                GUARD_CU(cudaDeviceSynchronize());
+                GUARD_CU(cudaPeekAtLastError());
+            }else{
                 // Deallocate device memory
                 mem_free<<<app_grid_size, block_size>>>(requests.d_memory, requests.request_id, 
 #ifdef OUROBOROS__
@@ -554,6 +651,7 @@ void pmm_init(int turn_on, int size_to_alloc, size_t* ins_size, size_t num_itera
 #endif
 #endif
                         requests.requests_number);
+
 
                 GUARD_CU(cudaPeekAtLastError());
                 GUARD_CU(cudaDeviceSynchronize());
