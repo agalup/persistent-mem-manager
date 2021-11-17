@@ -10,3 +10,6 @@
 [submodule "GPUMemManSurvey"]
 	path = GPUMemManSurvey
 	url = https://github.com/GPUPeople/GPUMemManSurvey.git
+[submodule "SlabHash"]
+	path = SlabHash
+	url = https://github.com/agalup/SlabHash.git

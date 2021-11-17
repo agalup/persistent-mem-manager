@@ -1,3 +1,4 @@
+#include "src/gpu_hash_table.cuh"
 
 cudaError_t GRError(cudaError_t error, const char *message,
                     const char *filename, int line, bool print) {
@@ -32,6 +33,10 @@ struct RequestType{
     void init(size_t Size);
     void memset();
     void free();
+
+    // SlabHashTable
+    gpu_hash_table<uint32_t, uint32_t, SlabHashTypeT::ConcurrentMap>* hash_table;
+
 };
 
 void RequestType::init(size_t Size){
@@ -55,6 +60,18 @@ void RequestType::init(size_t Size){
 
     GUARD_CU(cudaDeviceSynchronize());
     GUARD_CU(cudaPeekAtLastError());
+
+    uint32_t num_keys = Size;
+    float expected_chain = 0.6f;
+    uint32_t num_elements_per_uint = 15;
+    uint32_t expected_elements_per_bucket = expected_chain * num_elements_per_uint;
+    uint32_t num_buckets = (num_keys + expected_elements_per_bucket - 1)/expected_elements_per_bucket;
+    const int64_t seed = 1;
+    uint32_t DEVICE_ID = 0;
+
+    hash_table = 
+        new gpu_hash_table<uint32_t, uint32_t, SlabHashTypeT::ConcurrentMap>(num_keys, num_buckets, DEVICE_ID, seed);
+
 }
 
 void RequestType::free(){
@@ -75,6 +92,8 @@ void RequestType::free(){
     GUARD_CU(cudaPeekAtLastError());
     GUARD_CU(cudaFree((void*)d_memory));
     GUARD_CU(cudaPeekAtLastError());
+
+    delete(hash_table);
 
     GUARD_CU(cudaDeviceSynchronize());
     GUARD_CU(cudaPeekAtLastError());

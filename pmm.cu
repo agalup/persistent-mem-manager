@@ -10,6 +10,7 @@
 #include "Utility.h"
 #include "cuda.h"
 #include "pmm-utils.cuh"
+#include "src/gpu_hash_table.cuh"
 
 using namespace std;
 
