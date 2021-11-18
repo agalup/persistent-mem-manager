@@ -130,6 +130,24 @@ void _request_processing(
     // SEMAPHORE
 }
 
+__global__
+void garbage_collector(volatile int** d_memory,
+                        volatile int* exit_signal,
+                        const int size,
+                        MemoryManagerType* mm){
+    int thid = blockIdx.x * blockDim.x + threadIdx.x;
+    
+    while (! exit_signal[0]){
+        /*for (int addr_id = thid; !exit_signal[0] && addr_id < size; 
+                addr_id += (blockIdx.x * blockDim.x)){
+            if (d_memory[addr_id]){
+                //free
+            }
+        }*/
+    }
+}
+
+
 //producer
 __global__
 void mem_manager(volatile int* exit_signal, 
@@ -504,7 +522,7 @@ void check_persistent_kernel_results(int* exit_signal,
 }
 
 void pmm_init(int turn_on, int size_to_alloc, size_t* ins_size, size_t num_iterations, 
-            int SMs, int* sm_app, int* sm_mm, int* allocs, float* malloc_sync, 
+            int SMs, int* sm_app, int* sm_mm, int* sm_gc, int* allocs, float* malloc_sync, 
             float* malloc_per_sec, float* free_sync, float* free_per_sec){
 
     auto instant_size = *ins_size;
@@ -524,14 +542,22 @@ void pmm_init(int turn_on, int size_to_alloc, size_t* ins_size, size_t num_itera
     GUARD_CU(cudaPeekAtLastError());
     //Creat two asynchronous streams which may run concurrently with the default stream 0.
     //The streams are not synchronized with the default stream.
-    cudaStream_t mm_stream, app_stream;
+    cudaStream_t gc_stream, mm_stream, app_stream;
+    GUARD_CU(cudaStreamCreateWithFlags( &gc_stream, cudaStreamNonBlocking));
+    GUARD_CU(cudaPeekAtLastError());
     GUARD_CU(cudaStreamCreateWithFlags( &mm_stream, cudaStreamNonBlocking));
     GUARD_CU(cudaPeekAtLastError());
     GUARD_CU(cudaStreamCreateWithFlags(&app_stream, cudaStreamNonBlocking));
     GUARD_CU(cudaPeekAtLastError());
+
+    printf("%d %d %d\n", gc_stream, mm_stream, app_stream);
     
     int* exit_signal;
     GUARD_CU(cudaMallocManaged(&exit_signal, sizeof(int32_t)));
+    GUARD_CU(cudaPeekAtLastError());
+
+    int* exit_signal_gc;
+    GUARD_CU(cudaMallocManaged(&exit_signal_gc, sizeof(int32_t)));
     GUARD_CU(cudaPeekAtLastError());
 
     int* exit_counter;
@@ -545,31 +571,41 @@ void pmm_init(int turn_on, int size_to_alloc, size_t* ins_size, size_t num_itera
     std::cout << "\t\t#allocs\t\t" << "#sm app\t\t" << "#sm mm\t\t" << 
                 "#malloc req per sec\t" << "malloc\t\t" << "#free req per sec\t" << "free\n";
 
-    for (int app_grid_size = 1; app_grid_size < SMs; ++app_grid_size){
+    int gc_grid_size = 1;
+
+    for (int app_grid_size = 1; app_grid_size < (SMs - gc_grid_size); ++app_grid_size){
 
         //int app_grid_size = 33;
-        int mm_grid_size = SMs - app_grid_size;
+        int mm_grid_size = SMs - gc_grid_size - app_grid_size;
+
+        printf("SMs: gc %d, mm %d, app %d, total %d\n", gc_grid_size, mm_grid_size, app_grid_size, SMs);
         int requests_num{app_grid_size*block_size};
 
         //output
         sm_app[app_grid_size - 1] = app_grid_size;
         sm_mm [app_grid_size - 1] = mm_grid_size;
+        sm_gc [app_grid_size - 1] = gc_grid_size;
         allocs[app_grid_size - 1] = requests_num;
 
         //Timing variables
-        PerfMeasure timing_malloc_app, timing_free_app, timing_mm, malloc_total_sync, free_total_sync;
+        PerfMeasure timing_malloc_app, timing_free_app, timing_mm, timing_gc, malloc_total_sync, free_total_sync;
 
         for (int iteration = 0; iteration < num_iterations; ++iteration){
 
             *exit_signal = 0;
+            *exit_signal_gc = 0;
             *exit_counter = 0;
             RequestType requests;
             requests.init(requests_num);
             requests.memset();
+                
+            
+            printf("run mm\n");
 
-            // Run presistent kernel (Memory Manager)
+            // Run Memory Manager (Presistent kernel)
             timing_mm.startMeasurement();
-            mem_manager<<<mm_grid_size, block_size, 0, mm_stream>>>(exit_signal, requests.requests_number, 
+            mem_manager<<<mm_grid_size, block_size, 0, mm_stream>>>(exit_signal, 
+                    requests.requests_number, 
                     requests.request_iter, requests.request_signal, requests.request_id,
 #ifdef OUROBOROS__
                     memory_manager.getDeviceMemoryManager(),
@@ -582,6 +618,27 @@ void pmm_init(int turn_on, int size_to_alloc, size_t* ins_size, size_t num_itera
             timing_mm.stopMeasurement();
             GUARD_CU(cudaPeekAtLastError());
 
+            printf("run done\n");
+            printf("run app\n");
+
+            printf("run gc\n");
+
+            // Run Garbage Collector (persistent kernel)
+ /*           timing_gc.startMeasurement();
+            garbage_collector<<<gc_grid_size, block_size, 0, gc_stream>>>(requests.d_memory, exit_signal_gc,
+                    requests_num, 
+#ifdef OUROBOROS__
+                    memory_manager.getDeviceMemoryManager()
+#else
+#ifdef HALLOC__
+                    memory_manager
+#endif
+#endif
+                );
+            timing_gc.stopMeasurement();
+            GUARD_CU(cudaPeekAtLastError());*/
+
+            printf("run done\n");
             // Run application
             timing_malloc_app.startMeasurement();
             malloc_total_sync.startMeasurement();
@@ -591,12 +648,16 @@ void pmm_init(int turn_on, int size_to_alloc, size_t* ins_size, size_t num_itera
             timing_malloc_app.stopMeasurement();
             GUARD_CU(cudaPeekAtLastError());
 
+            printf("malloc done\n");
+
             bool kernel_complete = false;
             // Check resutls: test
             check_persistent_kernel_results(exit_signal, exit_counter, block_size, app_grid_size, app_stream,
                         turn_on, requests, requests_num, kernel_complete);
 
             malloc_total_sync.stopMeasurement();
+
+            printf("check done\n");
 
             if (kernel_complete){
                 if (turn_on){

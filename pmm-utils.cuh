@@ -35,7 +35,7 @@ struct RequestType{
     void free();
 
     // SlabHashTable
-    gpu_hash_table<uint32_t, uint32_t, SlabHashTypeT::ConcurrentMap>* hash_table;
+    //gpu_hash_table<uint32_t, uint32_t, SlabHashTypeT::ConcurrentMap>* hash_table;
 
 };
 
@@ -61,16 +61,17 @@ void RequestType::init(size_t Size){
     GUARD_CU(cudaDeviceSynchronize());
     GUARD_CU(cudaPeekAtLastError());
 
-    uint32_t num_keys = Size;
+    /*
+    uint32_t num_keys = 1<<20;
     float expected_chain = 0.6f;
     uint32_t num_elements_per_uint = 15;
     uint32_t expected_elements_per_bucket = expected_chain * num_elements_per_uint;
     uint32_t num_buckets = (num_keys + expected_elements_per_bucket - 1)/expected_elements_per_bucket;
     const int64_t seed = 1;
     uint32_t DEVICE_ID = 0;
-
     hash_table = 
         new gpu_hash_table<uint32_t, uint32_t, SlabHashTypeT::ConcurrentMap>(num_keys, num_buckets, DEVICE_ID, seed);
+    */
 
 }
 
@@ -93,7 +94,7 @@ void RequestType::free(){
     GUARD_CU(cudaFree((void*)d_memory));
     GUARD_CU(cudaPeekAtLastError());
 
-    delete(hash_table);
+    //delete(hash_table);
 
     GUARD_CU(cudaDeviceSynchronize());
     GUARD_CU(cudaPeekAtLastError());
@@ -106,12 +107,10 @@ void RequestType::memset(){
     *request_iter = 0;
 
     GUARD_CU(cudaMemset((void*)request_signal, 0,   size * sizeof(volatile int)));
-
     GUARD_CU(cudaMemset((void*)request_id, -1,      size * sizeof(volatile int)));
-
     GUARD_CU(cudaMemset((void*)request_mem_size, 0, size * sizeof(volatile int)));
-
     GUARD_CU(cudaMemset((void*)lock, 0,             size * sizeof(volatile int)));
+    GUARD_CU(cudaMemset((int**)d_memory, NULL, size * sizeof(volatile int*)));
 
     GUARD_CU(cudaDeviceSynchronize());
     GUARD_CU(cudaPeekAtLastError());
@@ -123,6 +122,7 @@ void copy(int** d_memory0, int* d_memory, int size){
     int thid = blockIdx.x * blockDim.x + threadIdx.x;
     d_memory[thid] = d_memory0[thid][0];
 }
+
 //mem test
 void mem_test(int** d_memory0, int requests_num, int blocks, int threads){
     //create array
@@ -139,7 +139,6 @@ void mem_test(int** d_memory0, int requests_num, int blocks, int threads){
     GUARD_CU(cudaPeekAtLastError());
 }
 
-
 __device__ void acquire_semaphore(int* lock, int i){
     while (atomicCAS(&lock[i], 0, 1) != 0){
         //printf("acq semaphore: thread %d\n", threadIdx.x);
@@ -151,7 +150,6 @@ __device__ void release_semaphore(int* lock, int i){
     __threadfence();
     lock[i] = 0;
 }
-
 
 //test
 __global__
