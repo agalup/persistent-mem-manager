@@ -10,7 +10,7 @@
 #include "Utility.h"
 #include "cuda.h"
 #include "pmm-utils.cuh"
-#include "src/gpu_hash_table.cuh"
+//#include "src/gpu_hash_table.cuh"
 
 using namespace std;
 
@@ -137,7 +137,9 @@ void garbage_collector(volatile int** d_memory,
                         MemoryManagerType* mm){
     int thid = blockIdx.x * blockDim.x + threadIdx.x;
     
+    __threadfence();
     while (! exit_signal[0]){
+        __threadfence();
         /*for (int addr_id = thid; !exit_signal[0] && addr_id < size; 
                 addr_id += (blockIdx.x * blockDim.x)){
             if (d_memory[addr_id]){
@@ -556,10 +558,6 @@ void pmm_init(int turn_on, int size_to_alloc, size_t* ins_size, size_t num_itera
     GUARD_CU(cudaMallocManaged(&exit_signal, sizeof(int32_t)));
     GUARD_CU(cudaPeekAtLastError());
 
-    int* exit_signal_gc;
-    GUARD_CU(cudaMallocManaged(&exit_signal_gc, sizeof(int32_t)));
-    GUARD_CU(cudaPeekAtLastError());
-
     int* exit_counter;
     GUARD_CU(cudaMallocManaged(&exit_counter, sizeof(uint32_t)));
     GUARD_CU(cudaDeviceSynchronize());
@@ -593,7 +591,6 @@ void pmm_init(int turn_on, int size_to_alloc, size_t* ins_size, size_t num_itera
         for (int iteration = 0; iteration < num_iterations; ++iteration){
 
             *exit_signal = 0;
-            *exit_signal_gc = 0;
             *exit_counter = 0;
             RequestType requests;
             requests.init(requests_num);
@@ -618,14 +615,13 @@ void pmm_init(int turn_on, int size_to_alloc, size_t* ins_size, size_t num_itera
             timing_mm.stopMeasurement();
             GUARD_CU(cudaPeekAtLastError());
 
-            printf("run done\n");
-            printf("run app\n");
+            printf("mm running\n");
 
             printf("run gc\n");
 
             // Run Garbage Collector (persistent kernel)
- /*           timing_gc.startMeasurement();
-            garbage_collector<<<gc_grid_size, block_size, 0, gc_stream>>>(requests.d_memory, exit_signal_gc,
+            timing_gc.startMeasurement();
+            garbage_collector<<<gc_grid_size, block_size, 0, gc_stream>>>(requests.d_memory, exit_signal,
                     requests_num, 
 #ifdef OUROBOROS__
                     memory_manager.getDeviceMemoryManager()
@@ -636,9 +632,12 @@ void pmm_init(int turn_on, int size_to_alloc, size_t* ins_size, size_t num_itera
 #endif
                 );
             timing_gc.stopMeasurement();
-            GUARD_CU(cudaPeekAtLastError());*/
+            GUARD_CU(cudaPeekAtLastError());
 
-            printf("run done\n");
+            printf("gc running    \n");
+            printf("run app\n");
+
+     
             // Run application
             timing_malloc_app.startMeasurement();
             malloc_total_sync.startMeasurement();
@@ -647,6 +646,8 @@ void pmm_init(int turn_on, int size_to_alloc, size_t* ins_size, size_t num_itera
                     exit_counter, requests.lock, size_to_alloc, turn_on);
             timing_malloc_app.stopMeasurement();
             GUARD_CU(cudaPeekAtLastError());
+
+            printf("app running\n");
 
             printf("malloc done\n");
 
@@ -690,7 +691,7 @@ void pmm_init(int turn_on, int size_to_alloc, size_t* ins_size, size_t num_itera
             }
 
             *exit_counter = 0;
-                
+            printf("run free\n");    
             timing_free_app.startMeasurement();
             free_total_sync.startMeasurement();
             free_app_test<<<app_grid_size, block_size, 0, app_stream>>>(exit_signal, requests.d_memory, 
@@ -698,15 +699,25 @@ void pmm_init(int turn_on, int size_to_alloc, size_t* ins_size, size_t num_itera
                     exit_counter, requests.lock, size_to_alloc, turn_on);
             timing_free_app.stopMeasurement();
             GUARD_CU(cudaPeekAtLastError());
+            printf("free running\n");
 
+            printf("run check\n");
             kernel_complete = false;
             // Check resutls: test
             check_persistent_kernel_results(exit_signal, exit_counter, block_size, app_grid_size, app_stream,
                         turn_on, requests, requests_num, kernel_complete);
-
+            printf("check done\n");
             *exit_signal = 1;
             GUARD_CU(cudaPeekAtLastError());
+            printf("waiting for streams\n");
+            GUARD_CU(cudaStreamSynchronize(app_stream));
+            printf("app stream synced\n");
+            GUARD_CU(cudaStreamSynchronize(mm_stream));
+            printf("mm stream synced\n");
+            GUARD_CU(cudaStreamSynchronize(gc_stream));
+            printf("gc stream synced\n");
             GUARD_CU(cudaDeviceSynchronize());
+            printf("streams done\n");
             GUARD_CU(cudaPeekAtLastError());
             requests.free();
             GUARD_CU(cudaDeviceSynchronize());
