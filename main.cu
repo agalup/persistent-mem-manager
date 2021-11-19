@@ -4,7 +4,7 @@ using namespace std;
 int main(int argc, char *argv[]){
 
     //size_t instant_size = 8 * 1024ULL * 1024ULL * 1024ULL;
-    size_t instant_size = 2 * 1024ULL * 1024ULL * 1024ULL;
+    size_t instant_size = 4 * 1024ULL * 1024ULL * 1024ULL;
     int size_to_alloc = 4;
     int iteration_num = 1;
 

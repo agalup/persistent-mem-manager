@@ -111,7 +111,7 @@ void RequestType::memset(){
     GUARD_CU(cudaMemset((void*)request_id, -1,      size * sizeof(volatile int)));
     GUARD_CU(cudaMemset((void*)request_mem_size, 0, size * sizeof(volatile int)));
     GUARD_CU(cudaMemset((void*)lock, 0,             size * sizeof(volatile int)));
-    GUARD_CU(cudaMemset((int**)d_memory, NULL, size * sizeof(volatile int*)));
+    GUARD_CU(cudaMemset((int**)d_memory, NULL,      size * sizeof(volatile int*)));
 
     GUARD_CU(cudaDeviceSynchronize());
     GUARD_CU(cudaPeekAtLastError());
@@ -154,9 +154,11 @@ __device__ void release_semaphore(int* lock, int i){
 
 //test
 __global__
-void test1(volatile int** d_memory){
+void test1(volatile int** d_memory, int size){
     int thid = blockDim.x * blockIdx.x + threadIdx.x;
-    assert(d_memory[thid]);
-    d_memory[thid][0] *= 100;
+    if (thid < size){
+        assert(d_memory[thid]);
+        d_memory[thid][0] *= 100;
+    }
 }
 
