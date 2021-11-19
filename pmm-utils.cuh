@@ -1,6 +1,56 @@
 
+#ifndef _pmm_utils_h
+#define _pmm_utils_h
+
+#include "device/Ouroboros_impl.cuh"
+#include "device/MemoryInitialization.cuh"
+#include "InstanceDefinitions.cuh"
+#include "PerformanceMeasure.cuh"
+#include "Utility.h"
+#include "cuda.h"
+#include <algorithm>
+#include <iostream>
+#include <string>
+#include <cassert>
+
+using namespace std;
 //#include "src/gpu_hash_table.cuh"
 
+
+extern "C"{
+
+//#define DEBUG
+#ifdef DEBUG
+#define debug(a...) printf(a)
+#else
+#define debug(a...)
+#endif
+
+#ifdef HALLOC__
+#include "Instance.cuh"
+#endif
+
+
+#ifdef OUROBOROS__
+    //Ouroboros initialization
+    #define MemoryManagerType OuroPQ
+#endif
+#ifdef HALLOC__
+    //Halloc initialization
+    #define MemoryManagerType MemoryManagerHalloc
+#endif
+
+#define EMPTY       0
+#define DONE        2
+#define MALLOC      3
+#define FREE        5
+
+enum request_type {
+    request_empty       = EMPTY,
+    request_done        = DONE,
+    request_malloc      = MALLOC, 
+    request_free        = FREE
+};
 cudaError_t GRError(cudaError_t error, const char *message,
                     const char *filename, int line, bool print) {
   if (error && print) {
@@ -51,6 +101,7 @@ void RequestType::init(size_t Size){
     GUARD_CU(cudaMallocManaged(&request_signal,   size * sizeof(volatile int)));
     GUARD_CU(cudaPeekAtLastError());
     GUARD_CU(cudaMallocManaged(&request_id,       size * sizeof(volatile int)));
+
     GUARD_CU(cudaPeekAtLastError());
     GUARD_CU(cudaMallocManaged(&request_mem_size, size * sizeof(volatile int)));
     GUARD_CU(cudaPeekAtLastError());
@@ -162,3 +213,5 @@ void test1(volatile int** d_memory, int size){
     }
 }
 
+}
+#endif

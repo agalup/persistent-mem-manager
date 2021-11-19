@@ -1,4 +1,7 @@
 #include "pmm.cu"
+#include "monolitic_mm.cu"
+#include "pmm-utils.cuh"
+
 using namespace std;
 
 int main(int argc, char *argv[]){
