@@ -219,7 +219,7 @@ __global__
 void test2(volatile int** d_memory, int size){
     int thid = blockDim.x * blockIdx.x + threadIdx.x;
     if (thid < size){
-        assert(d_memory[thid] != NULL);
+        assert(d_memory[thid] == NULL);
     }
 }
 }

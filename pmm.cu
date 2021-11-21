@@ -91,7 +91,7 @@ void _request_processing(
                 if (d_memory[addr_id] != NULL){
                     __threadfence();
                     if (d_memory[addr_id][0] == -1){
-                        printf(". %d\n", addr_id);
+     //                   printf(". %d\n", addr_id);
                         mm->free((void*)d_memory[addr_id]);
                         d_memory[addr_id] = NULL;
                     }
@@ -131,7 +131,7 @@ void garbage_collector(volatile int** d_memory,
                 //printf("%d %d\n", request_id, d_memory[request_id][0]);
                 _request_processing(request_id, exit_signal, request_signal,
                                     request_iter, request_ids, mm, d_memory, 
-                                    request_mem_size, lock, 0);
+                                    request_mem_size, lock, 1);
             }
         }
     }
