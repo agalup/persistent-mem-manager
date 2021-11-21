@@ -44,12 +44,14 @@ extern "C"{
 #define DONE        2
 #define MALLOC      3
 #define FREE        5
+#define GC          7
 
 enum request_type {
     request_empty       = EMPTY,
     request_done        = DONE,
     request_malloc      = MALLOC, 
-    request_free        = FREE
+    request_free        = FREE,
+    request_gc          = GC
 };
 cudaError_t GRError(cudaError_t error, const char *message,
                     const char *filename, int line, bool print) {
@@ -213,5 +215,12 @@ void test1(volatile int** d_memory, int size){
     }
 }
 
+__global__
+void test2(volatile int** d_memory, int size){
+    int thid = blockDim.x * blockIdx.x + threadIdx.x;
+    if (thid < size){
+        assert(d_memory[thid] != NULL);
+    }
+}
 }
 #endif
