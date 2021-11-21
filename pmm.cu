@@ -91,6 +91,7 @@ void _request_processing(
                 if (d_memory[addr_id] != NULL){
                     __threadfence();
                     if (d_memory[addr_id][0] == -1){
+                        printf(". %d\n", addr_id);
                         mm->free((void*)d_memory[addr_id]);
                         d_memory[addr_id] = NULL;
                     }
@@ -127,6 +128,7 @@ void garbage_collector(volatile int** d_memory,
                 //addr_id += (gridDim.x * blockDim.x)){
                 request_id += blockDim.x*gridDim.x){
             if (request_signal[request_id] == GC){
+                //printf("%d %d\n", request_id, d_memory[request_id][0]);
                 _request_processing(request_id, exit_signal, request_signal,
                                     request_iter, request_ids, mm, d_memory, 
                                     request_mem_size, lock, 0);
@@ -522,6 +524,25 @@ void start_application(int type,
     }
 }
 
+void sync_streams(cudaStream_t& gc_stream, 
+                  cudaStream_t& mm_stream, 
+                  cudaStream_t& app_stream){
+
+    printf("waiting for streams\n");
+    GUARD_CU(cudaStreamSynchronize(app_stream));
+    GUARD_CU(cudaPeekAtLastError());
+    printf("app stream synced\n");
+    GUARD_CU(cudaStreamSynchronize(mm_stream));
+    GUARD_CU(cudaPeekAtLastError());
+    printf("mm stream synced\n");
+    GUARD_CU(cudaStreamSynchronize(gc_stream));
+    GUARD_CU(cudaPeekAtLastError());
+    printf("gc stream synced\n");
+    GUARD_CU(cudaPeekAtLastError());
+
+}
+
+
 void pmm_init(int call_on, int size_to_alloc, size_t* ins_size, 
               size_t num_iterations, int SMs, int* sm_app, int* sm_mm, int* sm_gc, 
               int* allocs, float* malloc_sync, float* malloc_per_sec, 
@@ -598,6 +619,7 @@ void pmm_init(int call_on, int size_to_alloc, size_t* ins_size,
                                  exit_signal, requests, memory_manager);
             
 
+            // Run APP (all threads do malloc)
             bool kernel_complete = false;
             start_application(MALLOC, timing_malloc_app, malloc_total_sync, 
                               app_grid_size, block_size, app_stream, exit_signal,
@@ -611,28 +633,15 @@ void pmm_init(int call_on, int size_to_alloc, size_t* ins_size,
                 continue;
             }
 
+            // Run APP (all threads do free)
             *exit_counter = 0;
             kernel_complete = false;
             start_application(FREE, timing_free_app, free_total_sync, 
                               app_grid_size, block_size, app_stream, exit_signal,
                               requests, exit_counter, 0, call_on, kernel_complete);
 
-            printf("waiting for streams\n");
-            GUARD_CU(cudaStreamSynchronize(app_stream));
-            GUARD_CU(cudaPeekAtLastError());
             *exit_signal = 1;
-            printf("app stream synced\n");
-            GUARD_CU(cudaStreamSynchronize(mm_stream));
-            GUARD_CU(cudaPeekAtLastError());
-            printf("mm stream synced\n");
-            GUARD_CU(cudaStreamSynchronize(gc_stream));
-            GUARD_CU(cudaPeekAtLastError());
-            printf("gc stream synced\n");
-            GUARD_CU(cudaPeekAtLastError());
-
-            fflush(stdout);
-            GUARD_CU(cudaDeviceSynchronize());
-            GUARD_CU(cudaPeekAtLastError());
+            sync_streams(app_stream, mm_stream, gc_stream);
 
             // Deallocate device memory
             clean_memory(app_grid_size, block_size, requests, memory_manager, exit_signal);
