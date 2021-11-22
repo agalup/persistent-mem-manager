@@ -75,12 +75,13 @@ cudaError_t GRError(cudaError_t error, const char *message,
 struct RequestType{
 
     volatile int* requests_number; 
-    volatile int* request_iter;
+    volatile int* request_counter;
     volatile int* request_signal; 
     volatile int* request_id; 
     volatile int* request_mem_size;
     volatile int* lock;
     volatile int** d_memory{nullptr};
+    volatile int*** request_dest;
     int size;
 
     void init(size_t Size);
@@ -98,7 +99,7 @@ void RequestType::init(size_t Size){
 
     GUARD_CU(cudaMallocManaged(&requests_number,         sizeof(volatile int)));
     GUARD_CU(cudaPeekAtLastError());
-    GUARD_CU(cudaMallocManaged(&request_iter,            sizeof(volatile int)));
+    GUARD_CU(cudaMallocManaged(&request_counter,         sizeof(volatile int)));
     GUARD_CU(cudaPeekAtLastError());
     GUARD_CU(cudaMallocManaged(&request_signal,   size * sizeof(volatile int)));
     GUARD_CU(cudaPeekAtLastError());
@@ -110,6 +111,8 @@ void RequestType::init(size_t Size){
     GUARD_CU(cudaMallocManaged(&lock,             size * sizeof(volatile int)));
     GUARD_CU(cudaPeekAtLastError());
     GUARD_CU(cudaMalloc(&d_memory,                size * sizeof(volatile int*)));
+    GUARD_CU(cudaPeekAtLastError());
+    GUARD_CU(cudaMalloc(&request_dest,            size * sizeof(volatile int**)));
     GUARD_CU(cudaPeekAtLastError());
 
     GUARD_CU(cudaDeviceSynchronize());
@@ -135,7 +138,7 @@ void RequestType::free(){
     GUARD_CU(cudaPeekAtLastError());
     GUARD_CU(cudaFree((void*)requests_number));
     GUARD_CU(cudaPeekAtLastError());
-    GUARD_CU(cudaFree((void*)request_iter));
+    GUARD_CU(cudaFree((void*)request_counter));
     GUARD_CU(cudaPeekAtLastError());
     GUARD_CU(cudaFree((void*)request_signal));
     GUARD_CU(cudaPeekAtLastError());
@@ -146,6 +149,8 @@ void RequestType::free(){
     GUARD_CU(cudaFree((void*)lock));
     GUARD_CU(cudaPeekAtLastError());
     GUARD_CU(cudaFree((void*)d_memory));
+    GUARD_CU(cudaPeekAtLastError());
+    GUARD_CU(cudaFree((void*)request_dest));
     GUARD_CU(cudaPeekAtLastError());
 
     //delete(hash_table);
@@ -158,13 +163,14 @@ void RequestType::memset(){
 
     *requests_number = size;
 
-    *request_iter = 0;
+    *request_counter = 0;
 
     GUARD_CU(cudaMemset((void*)request_signal, 0,   size * sizeof(volatile int)));
     GUARD_CU(cudaMemset((void*)request_id, -1,      size * sizeof(volatile int)));
     GUARD_CU(cudaMemset((void*)request_mem_size, 0, size * sizeof(volatile int)));
     GUARD_CU(cudaMemset((void*)lock, 0,             size * sizeof(volatile int)));
     GUARD_CU(cudaMemset((int**)d_memory, NULL,      size * sizeof(volatile int*)));
+    GUARD_CU(cudaMemset((int***)request_dest, NULL, size * sizeof(volatile int**)));
 
     GUARD_CU(cudaDeviceSynchronize());
     GUARD_CU(cudaPeekAtLastError());

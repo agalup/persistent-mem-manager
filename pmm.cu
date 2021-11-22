@@ -37,8 +37,9 @@ void _request_processing(
         int request_id, 
         volatile int* exit_signal,
         volatile int* request_signal,
-        volatile int* request_iter,
+        volatile int* request_counter,
         volatile int* request_ids, 
+        volatile int*** request_dest, 
         MemoryManagerType* mm, 
         volatile int** d_memory,
         volatile int* request_mem_size,
@@ -54,7 +55,7 @@ void _request_processing(
         switch (request_signal[request_id]){
 
             case MALLOC:
-                int req_id = atomicAdd((int*)&request_iter[0], 1);
+                int req_id = atomicAdd((int*)&request_counter[0], 1);
                 request_ids[request_id] = req_id;
                 d_memory[req_id] = reinterpret_cast<volatile int*>
                     (mm->malloc(4+request_mem_size[request_id]));
@@ -65,6 +66,9 @@ void _request_processing(
                         assert(d_memory[req_id]);
                     }
                 }
+                d_memory[req_id][0] = 0;
+                *(request_dest[request_id]) = &d_memory[req_id][1];
+                assert(*(request_dest[request_id]) == &d_memory[req_id][1]);
                 // SIGNAL update
                 atomicExch((int*)&request_signal[request_id], request_done);
                 break;
@@ -73,10 +77,6 @@ void _request_processing(
                 assert(d_memory[request_ids[request_id]]);
                 auto request_status = d_memory[request_ids[request_id]][0] - 1;
                 d_memory[request_ids[request_id]][0] -= 1;
-                /*printf("d_memory[%d] = %d\n", request_ids[request_id], 
-                    d_memory[request_ids[request_id]]);*/
-                //Moved to GC:
-                //mm->free((void*)d_memory[request_ids[request_id]]);
                 // SIGNAL update
                 if (request_status < 0){
                     atomicExch((int*)&request_signal[request_id], request_gc);
@@ -91,7 +91,6 @@ void _request_processing(
                 if (d_memory[addr_id] != NULL){
                     __threadfence();
                     if (d_memory[addr_id][0] == -1){
-     //                   printf(". %d\n", addr_id);
                         mm->free((void*)d_memory[addr_id]);
                         d_memory[addr_id] = NULL;
                     }
@@ -111,13 +110,12 @@ void _request_processing(
 __global__
 void garbage_collector(volatile int** d_memory,
                        volatile int* requests_number, 
-                       volatile int* request_iter,
+                       volatile int* request_counter,
                        volatile int* request_signal, 
                        volatile int* request_ids, 
                        volatile int* request_mem_size,
                        volatile int* lock,
                        volatile int* exit_signal,
-                       //const int size,
                        MemoryManagerType* mm){
     int thid = blockIdx.x * blockDim.x + threadIdx.x;
     
@@ -125,13 +123,11 @@ void garbage_collector(volatile int** d_memory,
     while (! exit_signal[0]){
         //for (int addr_id = thid; !exit_signal[0] && addr_id < size; 
         for (int request_id=thid; !exit_signal[0] && request_id<requests_number[0]; 
-                //addr_id += (gridDim.x * blockDim.x)){
                 request_id += blockDim.x*gridDim.x){
             if (request_signal[request_id] == GC){
-                //printf("%d %d\n", request_id, d_memory[request_id][0]);
                 _request_processing(request_id, exit_signal, request_signal,
-                                    request_iter, request_ids, mm, d_memory, 
-                                    request_mem_size, lock, 1);
+                                    request_counter, request_ids, NULL, mm, 
+                                    d_memory, request_mem_size, lock, 1);
             }
         }
     }
@@ -142,9 +138,10 @@ void garbage_collector(volatile int** d_memory,
 __global__
 void mem_manager(volatile int* exit_signal, 
         volatile int* requests_number, 
-        volatile int* request_iter,
+        volatile int* request_counter,
         volatile int* request_signal, 
         volatile int* request_ids, 
+        volatile int*** request_dest,
         MemoryManagerType* mm, 
         volatile int** d_memory,
         volatile int* request_mem_size,
@@ -159,8 +156,8 @@ void mem_manager(volatile int* exit_signal,
             if (request_signal[request_id] == MALLOC or 
                 request_signal[request_id] == FREE){
                 _request_processing(request_id, exit_signal, request_signal, 
-                                    request_iter, request_ids, mm, d_memory, 
-                                    request_mem_size, lock, call_on);
+                                    request_counter, request_ids, request_dest,
+                                    mm, d_memory, request_mem_size, lock, call_on);
             
             debug("mm: request done %d\n", request_id);
             }
@@ -170,10 +167,12 @@ void mem_manager(volatile int* exit_signal,
 
 __device__
 void post_request(request_type type, 
+                  volatile int** dest,
                   volatile int* lock,
                   volatile int* request_mem_size,
                   volatile int* request_id,
                   volatile int* request_signal,
+                  volatile int*** request_dest,
                   int size_to_alloc){
 
     int thid = blockDim.x * blockIdx.x + threadIdx.x;
@@ -183,6 +182,7 @@ void post_request(request_type type,
     if (type == MALLOC){
         request_mem_size[thid] = size_to_alloc;
         request_id[thid] = -1;
+        request_dest[thid] = dest;
     }
     // SIGNAL update
     atomicExch((int*)&request_signal[thid], type);
@@ -197,8 +197,9 @@ void request_processed(request_type type,
                       volatile int* request_id,
                       volatile int* exit_signal,
                       volatile int** d_memory,
-                      volatile int** new_ptr,
+                      volatile int** dest,
                       volatile int* request_signal,
+                      volatile int*** request_dest,
                       int& req_id,
                       int call_on
                       ){
@@ -209,13 +210,19 @@ void request_processed(request_type type,
         case MALLOC:
             req_id = request_id[thid];
             if (req_id >= 0 && call_on && !exit_signal[0]) {
-                assert(d_memory[req_id]);
-                d_memory[req_id][0] = 0;
-                *new_ptr = &d_memory[req_id][1];
+                //assert(d_memory[req_id]);
+                //d_memory[req_id][0] = 0;
+                //*dest = &d_memory[req_id][1];
+                assert(d_memory[req_id] != NULL);
+                assert(d_memory[req_id][0] == 0);
+                assert(dest != NULL);
+                assert(*dest != NULL);
+                assert(request_dest[thid] == dest);
+                assert(*dest == &d_memory[req_id][1]);
+                assert(*(request_dest[thid]) == &d_memory[req_id][1]);
             }
             break;
         case FREE:
-            //d_memory[request_id[thid]] = NULL;
             break;
         case GC:
             assert(d_memory[req_id] == NULL);
@@ -235,10 +242,11 @@ __device__
 void request(request_type type,
         volatile int* exit_signal,
         volatile int** d_memory,
-        volatile int** new_ptr,
+        volatile int** dest,
         volatile int* request_signal,
         volatile int* request_mem_size, 
         volatile int* request_id,
+        volatile int*** request_dest,
         volatile int* lock,
         int size_to_alloc,
         int call_on
@@ -246,13 +254,13 @@ void request(request_type type,
 
     int thid = blockDim.x * blockIdx.x + threadIdx.x;
     int req_id = -1;
-    post_request(type, lock, request_mem_size, request_id, request_signal, size_to_alloc);
+    post_request(type, dest, lock, request_mem_size, request_id, request_signal, request_dest, size_to_alloc);
 
     // wait for success
     while (!exit_signal[0]){
         __threadfence();
         if (request_signal[thid] == request_done){
-            request_processed(type, lock, request_id, exit_signal, d_memory, new_ptr, request_signal, req_id, call_on);
+            request_processed(type, lock, request_id, exit_signal, d_memory, dest, request_signal, request_dest, req_id, call_on);
             if (type == MALLOC)
                 assert(d_memory[request_id[thid]]);
             break;
@@ -267,6 +275,7 @@ void malloc_app_test(volatile int* exit_signal,
         volatile int* request_signal, 
         volatile int* request_mem_size,
         volatile int* request_id, 
+        volatile int*** request_dest, 
         volatile int* exit_counter, 
         volatile int* lock,
         int size_to_alloc,
@@ -276,15 +285,14 @@ void malloc_app_test(volatile int* exit_signal,
    
     int* new_ptr;
     request((request_type)MALLOC, exit_signal, d_memory, &new_ptr, 
-            request_signal, request_mem_size, request_id, lock, 
-            size_to_alloc, call_on);
+            request_signal, request_mem_size, request_id, request_dest,
+            lock, size_to_alloc, call_on);
 
     new_ptr[0] = thid;
 
     assert(d_memory[request_id[thid]]);
     int value = d_memory[request_id[thid]][0];
     if (value != 0) printf("val = %d\n", value);
-    //assert(d_memory[request_id[thid]][0] == 0);
     assert(new_ptr[0] == thid);
     
     atomicAdd((int*)&exit_counter[0], 1);
@@ -297,6 +305,7 @@ void free_app_test(volatile int* exit_signal,
               volatile int* request_signal, 
               volatile int* request_mem_size,
               volatile int* request_id, 
+              volatile int*** request_dest, 
               volatile int* exit_counter, 
               volatile int* lock,
               int size_to_alloc,
@@ -308,8 +317,8 @@ void free_app_test(volatile int* exit_signal,
    
     int* new_ptr;
     request((request_type)FREE, exit_signal, d_memory, &new_ptr, 
-            request_signal, request_mem_size, request_id, lock, 
-            size_to_alloc, call_on);
+            request_signal, request_mem_size, request_id, request_dest,
+            lock, size_to_alloc, call_on);
 
     atomicAdd((int*)&exit_counter[0], 1);
 }
@@ -337,6 +346,7 @@ void check_persistent_kernel_results(int* exit_signal,
             finish = true;
             break;
         }else{
+            GUARD_CU(cudaPeekAtLastError());
             if (exit_counter[0] != old_counter){
                 old_counter = exit_counter[0];
                 //printf("%d\n", old_counter);
@@ -386,8 +396,8 @@ void start_memory_manager(PerfMeasure& timing_mm,
 
     timing_mm.startMeasurement();
     mem_manager<<<mm_grid_size, block_size, 0, mm_stream>>>(exit_signal, 
-            requests.requests_number, 
-            requests.request_iter, requests.request_signal, requests.request_id,
+            requests.requests_number, requests.request_counter, requests.request_signal, 
+            requests.request_id, requests.request_dest,
 #ifdef OUROBOROS__
             memory_manager.getDeviceMemoryManager(),
 #else
@@ -412,7 +422,7 @@ void start_garbage_collector(PerfMeasure& timing_gc,
     garbage_collector<<<gc_grid_size, block_size, 0, gc_stream>>>(
             requests.d_memory, 
             requests.requests_number,
-            requests.request_iter,
+            requests.request_counter,
             requests.request_signal,
             requests.request_id,
             requests.request_mem_size, 
@@ -482,8 +492,8 @@ void start_application(int type,
     printf("start kernel\n");
     kernel<<<grid_size, block_size, 0, stream>>>(exit_signal, requests.d_memory, 
             requests.request_signal, requests.request_mem_size, 
-            requests.request_id, exit_counter, requests.lock, size_to_alloc, 
-            call_on);
+            requests.request_id, requests.request_dest, exit_counter, requests.lock, 
+            size_to_alloc, call_on);
     timing_launch.stopMeasurement();
     GUARD_CU(cudaPeekAtLastError());
     printf("done\n");
