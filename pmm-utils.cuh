@@ -186,7 +186,6 @@ void copy(int** d_memory0, int* d_memory, int size){
 void mem_test(int** d_memory0, int requests_num, int blocks, int threads){
     //create array
     int* d_memory{nullptr};
-    cudaError_t retval;
     GUARD_CU(cudaMalloc(&d_memory, sizeof(int) * requests_num));
     GUARD_CU(cudaPeekAtLastError());
     copy<<<blocks, threads>>>(d_memory0, d_memory, requests_num);

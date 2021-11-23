@@ -287,6 +287,10 @@ void malloc_app_test(volatile int* exit_signal,
     int value = d_memory[request_id[thid]][0];
     if (value != 0) printf("val = %d\n", value);
     assert(new_ptr[0] == thid);
+
+    request((request_type)FREE, exit_signal, d_memory, &new_ptr,
+            request_signal, request_mem_size, request_id, request_dest,
+            lock, size_to_alloc, call_on);
     
     atomicAdd((int*)&exit_counter[0], 1);
 }
@@ -304,7 +308,7 @@ void free_app_test(volatile int* exit_signal,
               int size_to_alloc,
               int call_on){
     
-    int thid = blockDim.x * blockIdx.x + threadIdx.x;
+    //int thid = blockDim.x * blockIdx.x + threadIdx.x;
 
     __threadfence();
    
@@ -355,7 +359,7 @@ void check_persistent_kernel_results(int* exit_signal,
             GUARD_CU(cudaPeekAtLastError());
         }
     }
-    printf("all requests are posted\n");
+    debug("all requests are posted\n");
 
     GUARD_CU(cudaPeekAtLastError());
 }
@@ -481,29 +485,29 @@ void start_application(int type,
     if (type == FREE){
         kernel = free_app_test;
     }
-    printf("start kernel\n");
+    debug("start kernel\n");
     kernel<<<grid_size, block_size, 0, stream>>>(exit_signal, requests.d_memory, 
             requests.request_signal, requests.request_mem_size, 
             requests.request_id, requests.request_dest, exit_counter, requests.lock, 
             size_to_alloc, call_on);
     timing_launch.stopMeasurement();
     GUARD_CU(cudaPeekAtLastError());
-    printf("done\n");
+    debug("done\n");
     fflush(stdout);
 
 
     // Check resutls: test
-    printf("check results\n");
+    debug("check results\n");
     check_persistent_kernel_results(exit_signal, exit_counter, block_size, 
             grid_size, stream, call_on, requests, requests.size, kernel_complete);
     timing_sync.stopMeasurement();
     GUARD_CU(cudaPeekAtLastError());
-    printf("results done\n");
+    debug("results done\n");
     fflush(stdout);
 
     if (kernel_complete){
         if (type == MALLOC && call_on){
-            printf("test1!\n");
+            /*printf("test1!\n");
             GUARD_CU(cudaStreamSynchronize(stream));
             GUARD_CU(cudaPeekAtLastError());
             test1<<<grid_size, block_size, 0, stream>>>(requests.d_memory, 
@@ -513,9 +517,9 @@ void start_application(int type,
             mem_test((int**)requests.d_memory, requests.size, grid_size, block_size);
             GUARD_CU(cudaStreamSynchronize(stream));
             GUARD_CU(cudaPeekAtLastError());
-            printf("test done\n");
+            printf("test done\n");*/
         }else if (type == FREE){
-            printf("test2!\n");
+            debug("test2!\n");
             GUARD_CU(cudaStreamSynchronize(stream));
             GUARD_CU(cudaPeekAtLastError());
             test2<<<grid_size, block_size, 0, stream>>>(requests.d_memory, 
@@ -530,16 +534,16 @@ void sync_streams(cudaStream_t& gc_stream,
                   cudaStream_t& mm_stream, 
                   cudaStream_t& app_stream){
 
-    printf("waiting for streams\n");
+    debug("waiting for streams\n");
     GUARD_CU(cudaStreamSynchronize(app_stream));
     GUARD_CU(cudaPeekAtLastError());
-    printf("app stream synced\n");
+    debug("app stream synced\n");
     GUARD_CU(cudaStreamSynchronize(mm_stream));
     GUARD_CU(cudaPeekAtLastError());
-    printf("mm stream synced\n");
+    debug("mm stream synced\n");
     GUARD_CU(cudaStreamSynchronize(gc_stream));
     GUARD_CU(cudaPeekAtLastError());
-    printf("gc stream synced\n");
+    debug("gc stream synced\n");
     GUARD_CU(cudaPeekAtLastError());
 
 }
@@ -579,16 +583,18 @@ void pmm_init(int call_on, int size_to_alloc, size_t* ins_size,
     int block_size = 1024;
     printf("size to alloc per thread %d, num iterations %d, instantsize %ld\n", 
                 size_to_alloc, num_iterations, instant_size);
-    std::cout << "\t\t#allocs\t\t" << "#sm app\t\t" << "#sm mm\t\t" << 
-                "#malloc req per sec\t" << "malloc\t\t" << "#free req per sec\t" << "free\n";
+    std::cout << "#requests\t" << "#sm app\t\t" << "#sm mm\t\t" << "#sm gc\t\t" <<
+                "#malloc and free per sec\n";
 
-    int gc_grid_size = 1;
+    //int gc_grid_size = 1;
 
-    for (int app_grid_size = 1; app_grid_size < (SMs - gc_grid_size); ++app_grid_size){
+    for (int app_grid_size = 1; app_grid_size < (SMs - 2); ++app_grid_size){
 
-        int mm_grid_size = SMs - gc_grid_size - app_grid_size;
+    for (int mm_grid_size = 1; mm_grid_size < (SMs - app_grid_size); ++mm_grid_size){
 
-        printf("SMs: gc %d, mm %d, app %d, total %d\n", gc_grid_size, mm_grid_size, app_grid_size, SMs);
+        int gc_grid_size = SMs - app_grid_size - mm_grid_size;
+
+        debug("SMs: app %d, mm %d, gc %d, total %d\n", app_grid_size, mm_grid_size, gc_grid_size, SMs);
         int requests_num{app_grid_size*block_size};
 
         //output
@@ -635,12 +641,12 @@ void pmm_init(int call_on, int size_to_alloc, size_t* ins_size,
                 continue;
             }
 
-            // Run APP (all threads do free)
+     /*       // Run APP (all threads do free)
             *exit_counter = 0;
             kernel_complete = false;
             start_application(FREE, timing_free_app, free_total_sync, 
                               app_grid_size, block_size, app_stream, exit_signal,
-                              requests, exit_counter, 0, call_on, kernel_complete);
+                              requests, exit_counter, 0, call_on, kernel_complete);*/
 
             *exit_signal = 1;
             sync_streams(app_stream, mm_stream, gc_stream);
@@ -661,9 +667,11 @@ void pmm_init(int call_on, int size_to_alloc, size_t* ins_size,
         malloc_per_sec[app_grid_size - 1]   = (requests_num * 1000.0)/malloc_total_sync_time.mean_;
         free_per_sec[app_grid_size - 1]     = (requests_num * 1000.0)/free_total_sync_time.mean_;
 
-        printf("\t\t%d\t\t| %d\t\t| %d\t\t| %.2lf\t\t| %.2lf\t\t| %.2lf\t\t | %.2lf\n", requests_num, 
-            app_grid_size, mm_grid_size, malloc_per_sec[app_grid_size - 1], malloc_total_sync_time.mean_,
+        printf("  %d\t\t %d\t\t %d\t\t %d\t\t %.2lf\t\t \n", requests_num, 
+            app_grid_size, mm_grid_size, gc_grid_size, malloc_per_sec[app_grid_size - 1], 
+            malloc_total_sync_time.mean_,
             free_per_sec[app_grid_size - 1], free_total_sync_time.mean_);
+    }
     }
 
     GUARD_CU(cudaStreamSynchronize(mm_stream));
