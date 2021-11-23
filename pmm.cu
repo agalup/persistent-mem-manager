@@ -39,7 +39,7 @@ void _request_processing(
         volatile int* request_signal,
         volatile int* request_counter,
         volatile int* request_ids, 
-        volatile int*** request_dest, 
+        volatile int** request_dest, 
         MemoryManagerType* mm, 
         volatile int** d_memory,
         volatile int* request_mem_size,
@@ -67,10 +67,9 @@ void _request_processing(
                     }
                 }
                 d_memory[req_id][0] = 0;
-                *(request_dest[request_id]) = &d_memory[req_id][1];
-                assert(*(request_dest[request_id]) == &d_memory[req_id][1]);
-                // SIGNAL update
+                request_dest[request_id] = &d_memory[req_id][1];
                 atomicExch((int*)&request_signal[request_id], request_done);
+                __threadfence();
                 break;
 
             case FREE:
@@ -141,7 +140,7 @@ void mem_manager(volatile int* exit_signal,
         volatile int* request_counter,
         volatile int* request_signal, 
         volatile int* request_ids, 
-        volatile int*** request_dest,
+        volatile int** request_dest,
         MemoryManagerType* mm, 
         volatile int** d_memory,
         volatile int* request_mem_size,
@@ -172,7 +171,7 @@ void post_request(request_type type,
                   volatile int* request_mem_size,
                   volatile int* request_id,
                   volatile int* request_signal,
-                  volatile int*** request_dest,
+                  volatile int** request_dest,
                   int size_to_alloc){
 
     int thid = blockDim.x * blockIdx.x + threadIdx.x;
@@ -182,8 +181,8 @@ void post_request(request_type type,
     if (type == MALLOC){
         request_mem_size[thid] = size_to_alloc;
         request_id[thid] = -1;
-        request_dest[thid] = dest;
     }
+    __threadfence();
     // SIGNAL update
     atomicExch((int*)&request_signal[thid], type);
     __threadfence();
@@ -199,7 +198,7 @@ void request_processed(request_type type,
                       volatile int** d_memory,
                       volatile int** dest,
                       volatile int* request_signal,
-                      volatile int*** request_dest,
+                      volatile int** request_dest,
                       int& req_id,
                       int call_on
                       ){
@@ -210,16 +209,12 @@ void request_processed(request_type type,
         case MALLOC:
             req_id = request_id[thid];
             if (req_id >= 0 && call_on && !exit_signal[0]) {
-                //assert(d_memory[req_id]);
-                //d_memory[req_id][0] = 0;
-                //*dest = &d_memory[req_id][1];
+                __threadfence();
+                *dest = request_dest[thid];
                 assert(d_memory[req_id] != NULL);
                 assert(d_memory[req_id][0] == 0);
-                assert(dest != NULL);
                 assert(*dest != NULL);
-                assert(request_dest[thid] == dest);
-                assert(*dest == &d_memory[req_id][1]);
-                assert(*(request_dest[thid]) == &d_memory[req_id][1]);
+                assert(request_dest[thid] == *dest);
             }
             break;
         case FREE:
@@ -246,7 +241,7 @@ void request(request_type type,
         volatile int* request_signal,
         volatile int* request_mem_size, 
         volatile int* request_id,
-        volatile int*** request_dest,
+        volatile int** request_dest,
         volatile int* lock,
         int size_to_alloc,
         int call_on
@@ -261,8 +256,6 @@ void request(request_type type,
         __threadfence();
         if (request_signal[thid] == request_done){
             request_processed(type, lock, request_id, exit_signal, d_memory, dest, request_signal, request_dest, req_id, call_on);
-            if (type == MALLOC)
-                assert(d_memory[request_id[thid]]);
             break;
         }
     }
@@ -275,7 +268,7 @@ void malloc_app_test(volatile int* exit_signal,
         volatile int* request_signal, 
         volatile int* request_mem_size,
         volatile int* request_id, 
-        volatile int*** request_dest, 
+        volatile int** request_dest, 
         volatile int* exit_counter, 
         volatile int* lock,
         int size_to_alloc,
@@ -283,7 +276,7 @@ void malloc_app_test(volatile int* exit_signal,
 
     int thid = blockDim.x * blockIdx.x + threadIdx.x;
    
-    int* new_ptr;
+    volatile int* new_ptr = NULL;
     request((request_type)MALLOC, exit_signal, d_memory, &new_ptr, 
             request_signal, request_mem_size, request_id, request_dest,
             lock, size_to_alloc, call_on);
@@ -305,7 +298,7 @@ void free_app_test(volatile int* exit_signal,
               volatile int* request_signal, 
               volatile int* request_mem_size,
               volatile int* request_id, 
-              volatile int*** request_dest, 
+              volatile int** request_dest, 
               volatile int* exit_counter, 
               volatile int* lock,
               int size_to_alloc,
@@ -315,8 +308,7 @@ void free_app_test(volatile int* exit_signal,
 
     __threadfence();
    
-    int* new_ptr;
-    request((request_type)FREE, exit_signal, d_memory, &new_ptr, 
+    request((request_type)FREE, exit_signal, d_memory, NULL, 
             request_signal, request_mem_size, request_id, request_dest,
             lock, size_to_alloc, call_on);
 

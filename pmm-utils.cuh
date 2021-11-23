@@ -81,7 +81,7 @@ struct RequestType{
     volatile int* request_mem_size;
     volatile int* lock;
     volatile int** d_memory{nullptr};
-    volatile int*** request_dest;
+    volatile int** request_dest;
     int size;
 
     void init(size_t Size);
@@ -104,7 +104,6 @@ void RequestType::init(size_t Size){
     GUARD_CU(cudaMallocManaged(&request_signal,   size * sizeof(volatile int)));
     GUARD_CU(cudaPeekAtLastError());
     GUARD_CU(cudaMallocManaged(&request_id,       size * sizeof(volatile int)));
-
     GUARD_CU(cudaPeekAtLastError());
     GUARD_CU(cudaMallocManaged(&request_mem_size, size * sizeof(volatile int)));
     GUARD_CU(cudaPeekAtLastError());
@@ -112,7 +111,7 @@ void RequestType::init(size_t Size){
     GUARD_CU(cudaPeekAtLastError());
     GUARD_CU(cudaMalloc(&d_memory,                size * sizeof(volatile int*)));
     GUARD_CU(cudaPeekAtLastError());
-    GUARD_CU(cudaMalloc(&request_dest,            size * sizeof(volatile int**)));
+    GUARD_CU(cudaMalloc(&request_dest,            size * sizeof(volatile int*)));
     GUARD_CU(cudaPeekAtLastError());
 
     GUARD_CU(cudaDeviceSynchronize());
@@ -170,7 +169,7 @@ void RequestType::memset(){
     GUARD_CU(cudaMemset((void*)request_mem_size, 0, size * sizeof(volatile int)));
     GUARD_CU(cudaMemset((void*)lock, 0,             size * sizeof(volatile int)));
     GUARD_CU(cudaMemset((int**)d_memory, NULL,      size * sizeof(volatile int*)));
-    GUARD_CU(cudaMemset((int***)request_dest, NULL, size * sizeof(volatile int**)));
+    GUARD_CU(cudaMemset((int**)request_dest, NULL, size * sizeof(volatile int*)));
 
     GUARD_CU(cudaDeviceSynchronize());
     GUARD_CU(cudaPeekAtLastError());
