@@ -34,22 +34,22 @@ int main(int argc, char *argv[]){
     int SMs = deviceProp.multiProcessorCount;
     printf("max block number %d\n", SMs);
     printf("instant size %ld\n", instant_size);
-    int size = SMs - 1;
+    int size = 3*SMs;
 
     int* sm_app             = (int*)malloc(sizeof(int)*size);
     int* sm_mm              = (int*)malloc(sizeof(int)*size);
     int* sm_gc              = (int*)malloc(sizeof(int)*size);
     int* allocs_size        = (int*)malloc(sizeof(int)*size);
-    float* malloc_sync      = (float*)malloc(sizeof(float)*size);
-    float* malloc_per_sec   = (float*)malloc(sizeof(float)*size);
-    float* free_sync        = (float*)malloc(sizeof(float)*size);
-    float* free_per_sec     = (float*)malloc(sizeof(float)*size);
+    //float* malloc_sync      = (float*)malloc(sizeof(float)*size);
+    float* uni_req_per_sec   = (float*)malloc(sizeof(float)*size);
+    int* array_size         = new int(0);
+    //float* free_sync        = (float*)malloc(sizeof(float)*size);
+    //float* free_per_sec     = (float*)malloc(sizeof(float)*size);
     //float* app_sync        = (float*)malloc(sizeof(float)*size);
     //float* uni_req_num     = (float*)malloc(sizeof(float)*size);
     
     pmm_init(kernel_iter_num, size_to_alloc, &instant_size, iteration_num, SMs, 
-            sm_app, sm_mm, sm_gc, allocs_size, malloc_sync, malloc_per_sec, 
-            free_sync, free_per_sec);
+            sm_app, sm_mm, sm_gc, allocs_size, uni_req_per_sec, array_size);
 
     GUARD_CU(cudaDeviceReset());
     GUARD_CU(cudaPeekAtLastError());

@@ -551,8 +551,7 @@ void sync_streams(cudaStream_t& gc_stream,
 
 void pmm_init(int kernel_iteration_num, int size_to_alloc, size_t* ins_size, 
               size_t num_iterations, int SMs, int* sm_app, int* sm_mm, int* sm_gc, 
-              int* allocs, float* malloc_sync, float* malloc_per_sec, 
-              float* free_sync, float* free_per_sec){
+              int* allocs, float* uni_req_per_sec, int* array_size){
 
     auto instant_size = *ins_size;
 
@@ -588,9 +587,13 @@ void pmm_init(int kernel_iteration_num, int size_to_alloc, size_t* ins_size,
 
     //int gc_grid_size = 1;
 
+    int it = 0;
+
     for (int app_grid_size = 1; app_grid_size < (SMs - 2); ++app_grid_size){
+    //for (int app_grid_size = 1; app_grid_size < 5; ++app_grid_size){
 
     for (int mm_grid_size = 1; mm_grid_size < (SMs - app_grid_size); ++mm_grid_size){
+    //for (int mm_grid_size = 1; mm_grid_size < 5; ++mm_grid_size){
 
         int gc_grid_size = SMs - app_grid_size - mm_grid_size;
 
@@ -598,10 +601,10 @@ void pmm_init(int kernel_iteration_num, int size_to_alloc, size_t* ins_size,
         int requests_num{app_grid_size*block_size};
 
         //output
-        sm_app[app_grid_size - 1] = app_grid_size;
-        sm_mm [app_grid_size - 1] = mm_grid_size;
-        sm_gc [app_grid_size - 1] = gc_grid_size;
-        allocs[app_grid_size - 1] = requests_num;
+        sm_app[it] = app_grid_size;
+        sm_mm [it] = mm_grid_size;
+        sm_gc [it] = gc_grid_size;
+        allocs[it] = requests_num;
 
         //Timing variables
         PerfMeasure timing_malloc_app, timing_free_app, timing_mm, timing_gc, 
@@ -656,23 +659,29 @@ void pmm_init(int kernel_iteration_num, int size_to_alloc, size_t* ins_size,
 
         }
         // Output
-        auto malloc_time            = timing_malloc_app.generateResult();
-        auto free_time              = timing_free_app.generateResult();
+        //auto malloc_time            = timing_malloc_app.generateResult();
+        //auto free_time              = timing_free_app.generateResult();
         auto malloc_total_sync_time = malloc_total_sync.generateResult();
-        auto free_total_sync_time   = free_total_sync.generateResult();
+        //auto free_total_sync_time   = free_total_sync.generateResult();
 
-        malloc_sync[app_grid_size - 1]      = (malloc_total_sync_time.mean_);
-        free_sync[app_grid_size - 1]        = (free_total_sync_time.mean_);
+        //malloc_sync[app_grid_size - 1]      = (malloc_total_sync_time.mean_);
+        //free_sync[app_grid_size - 1]        = (free_total_sync_time.mean_);
         // The number of requests done per a second
-        malloc_per_sec[app_grid_size - 1]   = (requests_num * 1000.0)/malloc_total_sync_time.mean_;
-        free_per_sec[app_grid_size - 1]     = (requests_num * 1000.0)/free_total_sync_time.mean_;
+        uni_req_per_sec[it]   = (requests_num * 1000.0)/malloc_total_sync_time.mean_;
+        //free_per_sec[app_grid_size - 1]     = (requests_num * 1000.0)/free_total_sync_time.mean_;
 
         printf("  %d\t\t %d\t\t %d\t\t %d\t\t %.2lf\t\t \n", requests_num, 
-            app_grid_size, mm_grid_size, gc_grid_size, malloc_per_sec[app_grid_size - 1], 
-            malloc_total_sync_time.mean_,
-            free_per_sec[app_grid_size - 1], free_total_sync_time.mean_);
+            app_grid_size, mm_grid_size, gc_grid_size, 
+            uni_req_per_sec[it]);
+
+
+        ++it;
     }
     }
+    
+    *array_size = it;
+    //printf("it %d/ SMs %d\n", it, SMs);
+    //assert(it == SMs);
 
     GUARD_CU(cudaStreamSynchronize(mm_stream));
     GUARD_CU(cudaStreamSynchronize(app_stream));
