@@ -589,13 +589,15 @@ void pmm_init(int kernel_iteration_num, int size_to_alloc, size_t* ins_size,
 
     int it = 0;
 
-    for (int app_grid_size = 1; app_grid_size < (SMs - 2); ++app_grid_size){
+    for (int app_grid_size = 1; app_grid_size < SMs; ++app_grid_size){
     //for (int app_grid_size = 1; app_grid_size < 5; ++app_grid_size){
 
     for (int mm_grid_size = 1; mm_grid_size < (SMs - app_grid_size); ++mm_grid_size){
     //for (int mm_grid_size = 1; mm_grid_size < 5; ++mm_grid_size){
 
         int gc_grid_size = SMs - app_grid_size - mm_grid_size;
+        if (gc_grid_size <= 0)
+            continue;
 
         debug("SMs: app %d, mm %d, gc %d, total %d\n", app_grid_size, mm_grid_size, gc_grid_size, SMs);
         int requests_num{app_grid_size*block_size};

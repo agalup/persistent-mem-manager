@@ -18,6 +18,9 @@ import plotly
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+
+from pylab import *
+
 from numba import cuda as cu
 
 def draw_graph(plt, testcase, alloc_per_thread, iteration_num, SMs, allocs_size, 
@@ -41,61 +44,111 @@ def draw_graph(plt, testcase, alloc_per_thread, iteration_num, SMs, allocs_size,
                 str(sm_mm_list[i]) + ') ' + 
                 str(allocs_size[0][i]) for i in range(size)]
     
-    #launch_list     = [round(app_launch     [0][i],2) for i in range(size)]
-    #finish_list     = [round(app_finish     [0][i],2) for i in range(size)]
-    #sync_list_pmm   = [round(app_sync_pmm   [0][i],2) for i in range(size)]
-    #uni_req_num_pmm = [round(uni_req_num_pmm[0][i],1) for i in range(size)]
+    uni_req_num = [round(uni_req_num    [0][i],1) for i in range(size)]
+
+    #fig = plt.figure(figsize=(10, 10))
+    #ax = fig.add_subplot(111, projection='3d')
+
+    #color_map = cm.ScalarMappable(cmap=cm.Greens_r)
+    #color_map.set_array(uni_req_num)
+
+    ##plt.scatter(sm_app_list, sm_mm_list, sm_gc_list, marker='s', s=200, color='green')
+    #plt.scatter(sm_app_list, sm_mm_list, sm_gc_list, marker='s')
+    #plt.colorbar(color_map)
+
+    app = np.array(sm_app_list)
+    mm  = np.array(sm_mm_list)
+    gc  = np.array(sm_gc_list)
+    req = np.array(uni_req_num)
+
+    ax = plt.axes(projection = '3d')
     
-    #sync_list       = [round(app_sync       [0][i],2) for i in range(size)]
-    uni_req_num     = [round(uni_req_num    [0][i],1) for i in range(size)]
+    #colors = cm.rainbow(np.linspace(0, 1, req.shape[0]))
+    #colors = cm.rainbow(req)
+    #for dataset,color in zip(gc,colors):
+    #    ax.scatter3D(app,mm,dataset,color=color)
 
-    #col1 = 'darkblue'
-    #col2 = 'crimson'
+    SIZE = app[size-1]+1
+    SIZE2 = SIZE**2
+    #gc_f = np.zeros(SIZE2).reshape(SIZE, SIZE)
+    req_f = np.zeros(SIZE2).reshape(SIZE, SIZE)
+    #print(gc_f.shape)
+    #print(gc_f)
 
-    #if (not use_malloc):
-    #    col1 = 'blue'
-    #    col2 = 'red'
+    app_f = np.arange(1, 35, 1)
+    mm_f = np.arange(1, 35, 1)
+    app_f, mm_f = np.meshgrid(app_f, mm_f)
+    gc_f = SIZE - app_f - mm_f
 
-    col2 = 'blue'
-    col1 = 'red'
+    print(app_f)
+    print(mm_f)
+    print(gc_f)
 
-    #plt.subplot(131)
-    plt.plot   (sms_list, uni_req_num, color=col1)
-    plt.scatter(sms_list, uni_req_num, color=col1)
-    #plt.plot   (sms_list, uni_req_num_pmm, color=col2)
-    #plt.scatter(sms_list, uni_req_num_pmm, color=col2)
-    plt.xticks(rotation=90)
-    plt.xlabel("(SMs app, SMs mm, SMs gc)")
-    plt.ylabel("Number of requests per sec")
-    plt.title("Red - persistent memory man")
+    for i in range(size):
+        #app[i] = app[i] - 1
+        #mm[i] = mm[i] - 1
+        #gc[i] = gc[i] - 1
+        #gc_f[app[i]][mm[i]] = gc[i]
+        req_f[app[i]][mm[i]] = req[i]
+    #print(gc_f)
 
-    #plt.subplot(132)
-    #plt.plot    (sms_list_req, sync_list, color=col1)
-    #plt.scatter (sms_list_req, sync_list, color=col1)
-    #plt.plot    (sms_list_req, sync_list_pmm, color=col2)
-    #plt.scatter (sms_list_req, sync_list_pmm, color=col2)
-    #plt.xticks(rotation=90)
-    #plt.xlabel("(SMs app, SMs mm) #requests (allocations)")
-    #plt.ylabel("ms")
-    #plt.title("Red - persistent memory man. Blue - standard")
+    #print(app.shape)
+    #print(mm.shape)
+    print(app_f.shape)
+    print(mm_f.shape)
+    print(gc_f.shape)
+    #print(req_f.shape)
+
+    import matplotlib.cm as cmx
+    from mpl_toolkits.mplot3d import Axes3D
+    cm = plt.get_cmap('inferno')
+    cNorm = matplotlib.colors.Normalize(vmin=min(req), vmax=max(req))
+    scalarMap = cmx.ScalarMappable(norm=cNorm, cmap=cm)
+    fig = plt.figure(figsize = (20,20))
+    ax = Axes3D(fig)
+    ax.scatter(app, mm, gc, c=scalarMap.to_rgba(req), marker="^", s=100)
+    #ax.plot_surface(app_f, mm_f, gc_f, facecolors=scalarMap.to_rgba(req_f))
+
+    ax.set_xticks(np.arange(SIZE))
+    ax.set_yticks(np.arange(SIZE))
+    ax.set_zticks(np.arange(SIZE))
+
+    scalarMap.set_array(req)
+    fig.colorbar(scalarMap,label='Req per sec')
+
+    #C = np.linspace(min(req), max(req), req_f.size).reshape(req_f.shape)
+    ##C = np.linspace(min(req), max(req), req.size).reshape(req.shape)
+    #print(C.shape)
+    #scamap = plt.cm.ScalarMappable(cmap='inferno')
+    #fcolors = scamap.to_rgba(C)
+    #print(fcolors.shape)
+    #ax.plot_surface(mm, app, gc_f, facecolors=fcolors, cmap='inferno')
+    ##ax.plot_surface(mm, app, gc, facecolors=fcolors, cmap='inferno')
+
+    #plt.scatter(app, mm, gc)
    
-    #plt.subplot(133)
-    #plt.plot    (sms_list, launch_list, color=col2)
-    #plt.scatter (sms_list, launch_list, color=col2)
-    #plt.xticks(rotation=90)
-    #plt.xlabel("(SMs app, SMs mm)")
-    #plt.ylabel("ms")
-    #plt.title("App launch time persistent man")
-        
+    #print(sms)
+    #ax = sns.heatmap(sms)
+
+    #ax.set_title("3D Heatmap")
+    ax.set_xlabel('app')
+    ax.set_ylabel('mm')
+    ax.set_zlabel('gc')
+
     plt.suptitle(str(testcase))
 
-    use_malloc = 1
+    from numpy import arange
 
-    if use_malloc:
-        plt.savefig(str(testcase)+"_"+str(SMs)+"SMs_"+str(alloc_per_thread)+"_"+str(iteration_num)+"_"+str(size)+'.png')
-    else:
-        plt.savefig(str(testcase)+"_"+str(SMs)+"SMs_"+str(alloc_per_thread)+"_"+str(iteration_num)+
-        "_malloc_off"+'.png')
+    ii = -135
+    jj = -35.265
+    ax.view_init(azim=ii, elev=jj)
+    plt.savefig(str(testcase)+"_"+str(SMs)+"SMs_"+str(alloc_per_thread)+"_"+str(iteration_num)+"_"+str(size)+"movie_"+str(ii)+"_"+str(jj)+".pdf")
+
+       #for ii in arange(-146,-144,0.1):
+    #    for jj in arange(43, 45, 0.1):
+    #        ax.view_init(ii, jj)
+    #        #ax.view_init(azim-45, elev=42)
+    #        plt.savefig(str(testcase)+"_"+str(SMs)+"SMs_"+str(alloc_per_thread)+"_"+str(iteration_num)+"_"+str(size)+"movie_"+str(ii)+"_"+str(jj)+".pdf")
 
 def run_test(testcase, alloc_per_thread, device, pmm_init, 
             #perf_alloc, 
@@ -174,7 +227,7 @@ def run_test(testcase, alloc_per_thread, device, pmm_init,
 def main(argv):
     ### load shared libraries
     ouroboros = cdll.LoadLibrary('ouroboros_mm.so')
-    halloc = cdll.LoadLibrary('halloc_mm.so')
+    #halloc = cdll.LoadLibrary('halloc_mm.so')
 
     ### GPU properties
     device = cu.get_current_device()
