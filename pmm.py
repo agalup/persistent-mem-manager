@@ -23,11 +23,8 @@ from pylab import *
 
 from numba import cuda as cu
 
-def draw_graph(plt, testcase, alloc_per_thread, iteration_num, SMs, allocs_size, 
-               sm_app, sm_mm, sm_gc,
-               #app_launch, app_finish, app_sync_pmm, uni_req_num_pmm, app_sync, 
-               uni_req_num, array_size):
-               #use_malloc):
+def draw_graph(plt, testcase, alloc_per_thread, kernel_iter_num, iteration_num, 
+               SMs, allocs_size, sm_app, sm_mm, sm_gc, uni_req_num, array_size):
 
     print("results size ", array_size[0])
 
@@ -46,16 +43,6 @@ def draw_graph(plt, testcase, alloc_per_thread, iteration_num, SMs, allocs_size,
     
     uni_req_num = [round(uni_req_num    [0][i],1) for i in range(size)]
 
-    #fig = plt.figure(figsize=(10, 10))
-    #ax = fig.add_subplot(111, projection='3d')
-
-    #color_map = cm.ScalarMappable(cmap=cm.Greens_r)
-    #color_map.set_array(uni_req_num)
-
-    ##plt.scatter(sm_app_list, sm_mm_list, sm_gc_list, marker='s', s=200, color='green')
-    #plt.scatter(sm_app_list, sm_mm_list, sm_gc_list, marker='s')
-    #plt.colorbar(color_map)
-
     app = np.array(sm_app_list)
     mm  = np.array(sm_mm_list)
     gc  = np.array(sm_gc_list)
@@ -63,17 +50,9 @@ def draw_graph(plt, testcase, alloc_per_thread, iteration_num, SMs, allocs_size,
 
     ax = plt.axes(projection = '3d')
     
-    #colors = cm.rainbow(np.linspace(0, 1, req.shape[0]))
-    #colors = cm.rainbow(req)
-    #for dataset,color in zip(gc,colors):
-    #    ax.scatter3D(app,mm,dataset,color=color)
-
     SIZE = app[size-1]+1
     SIZE2 = SIZE**2
-    #gc_f = np.zeros(SIZE2).reshape(SIZE, SIZE)
     req_f = np.zeros(SIZE2).reshape(SIZE, SIZE)
-    #print(gc_f.shape)
-    #print(gc_f)
 
     app_f = np.arange(1, 35, 1)
     mm_f = np.arange(1, 35, 1)
@@ -85,19 +64,11 @@ def draw_graph(plt, testcase, alloc_per_thread, iteration_num, SMs, allocs_size,
     print(gc_f)
 
     for i in range(size):
-        #app[i] = app[i] - 1
-        #mm[i] = mm[i] - 1
-        #gc[i] = gc[i] - 1
-        #gc_f[app[i]][mm[i]] = gc[i]
-        req_f[app[i]][mm[i]] = req[i]
-    #print(gc_f)
+         req_f[app[i]][mm[i]] = req[i]
 
-    #print(app.shape)
-    #print(mm.shape)
     print(app_f.shape)
     print(mm_f.shape)
     print(gc_f.shape)
-    #print(req_f.shape)
 
     import matplotlib.cm as cmx
     from mpl_toolkits.mplot3d import Axes3D
@@ -106,8 +77,7 @@ def draw_graph(plt, testcase, alloc_per_thread, iteration_num, SMs, allocs_size,
     scalarMap = cmx.ScalarMappable(norm=cNorm, cmap=cm)
     fig = plt.figure(figsize = (20,20))
     ax = Axes3D(fig)
-    ax.scatter(app, mm, gc, c=scalarMap.to_rgba(req), marker="^", s=100)
-    #ax.plot_surface(app_f, mm_f, gc_f, facecolors=scalarMap.to_rgba(req_f))
+    ax.scatter(mm, gc, app, c=scalarMap.to_rgba(req), marker="s", s=400, alpha=1)
 
     ax.set_xticks(np.arange(SIZE))
     ax.set_yticks(np.arange(SIZE))
@@ -116,40 +86,29 @@ def draw_graph(plt, testcase, alloc_per_thread, iteration_num, SMs, allocs_size,
     scalarMap.set_array(req)
     fig.colorbar(scalarMap,label='Req per sec')
 
-    #C = np.linspace(min(req), max(req), req_f.size).reshape(req_f.shape)
-    ##C = np.linspace(min(req), max(req), req.size).reshape(req.shape)
-    #print(C.shape)
-    #scamap = plt.cm.ScalarMappable(cmap='inferno')
-    #fcolors = scamap.to_rgba(C)
-    #print(fcolors.shape)
-    #ax.plot_surface(mm, app, gc_f, facecolors=fcolors, cmap='inferno')
-    ##ax.plot_surface(mm, app, gc, facecolors=fcolors, cmap='inferno')
-
-    #plt.scatter(app, mm, gc)
-   
-    #print(sms)
-    #ax = sns.heatmap(sms)
-
-    #ax.set_title("3D Heatmap")
-    ax.set_xlabel('app')
-    ax.set_ylabel('mm')
-    ax.set_zlabel('gc')
+    ax.set_zlabel('app')
+    ax.set_xlabel('mm')
+    ax.set_ylabel('gc')
 
     plt.suptitle(str(testcase))
 
     from numpy import arange
 
+    pltname = str(testcase) + "_" + str(SMs) + "SMs_" + \
+    str(kernel_iter_num) + "_" + str(iteration_num) + "_" + \
+    str(size) + "_movie_"
+
     ii = -135
     jj = -35.265
     ax.view_init(azim=ii, elev=jj)
-    plt.savefig(str(testcase)+"_"+str(SMs)+"SMs_"+str(alloc_per_thread)+"_"+str(iteration_num)+"_"+str(size)+"movie_"+str(ii)+"_"+str(jj)+".pdf")
+    plt.savefig(pltname + str(ii) + "_" + str(jj) + ".pdf")
 
-       #for ii in arange(-146,-144,0.1):
-    #    for jj in arange(43, 45, 0.1):
-    #        ax.view_init(ii, jj)
-    #        #ax.view_init(azim-45, elev=42)
-    #        plt.savefig(str(testcase)+"_"+str(SMs)+"SMs_"+str(alloc_per_thread)+"_"+str(iteration_num)+"_"+str(size)+"movie_"+str(ii)+"_"+str(jj)+".pdf")
+    ii = -135
+    jj = 15
+    ax.view_init(azim=ii, elev=jj)
+    plt.savefig(pltname + str(ii) + "_" + str(jj) + ".pdf")
 
+       
 def run_test(testcase, alloc_per_thread, device, pmm_init, 
             #perf_alloc, 
             instant_size, iteration_num, kernel_iter_num):
@@ -169,18 +128,11 @@ def run_test(testcase, alloc_per_thread, device, pmm_init,
     sm_gc           = pointer((c_int * size)())
     requests_num    = pointer((c_int * size)())
     array_size      = pointer((c_int)())
-    #app_launch      = pointer((c_float * size)())
-    #app_finish      = pointer((c_float * size)())
-    #app_sync_pmm    = pointer((c_float * size)())
-    #app_sync        = pointer((c_float * size)())
-    #uni_req_num_pmm = pointer((c_float * size)())
     uni_req_num     = pointer((c_float * size)())
 
     print("pmm_init, use malloc")
     pmm_init(kernel_iter_num, alloc_per_thread, instant_size, iteration_num, 
              SMs, sm_app, sm_mm, sm_gc, requests_num, uni_req_num, array_size);
-             #app_launch, app_finish, 
-             #app_sync_pmm, uni_req_num_pmm);
 
     #device.reset()
 
@@ -189,8 +141,9 @@ def run_test(testcase, alloc_per_thread, device, pmm_init,
     #           app_sync, uni_req_num, use_malloc)
 
     ##draw both
-    draw_graph(plt, testcase, alloc_per_thread, iteration_num, SMs, requests_num, 
-               sm_app, sm_mm, sm_gc, uni_req_num, array_size)
+    draw_graph(plt, testcase, alloc_per_thread, kernel_iter_num, 
+                iteration_num, SMs, requests_num, sm_app, sm_mm, 
+                sm_gc, uni_req_num, array_size)
   
     #device.reset()
     #
@@ -248,8 +201,8 @@ def main(argv):
     if len(argv) > 1:
         kernel_iter_num = argv[1]
 
-    if len(argv) > 3:
-        instant_size = argv[3]
+    if len(argv) > 2:
+        instant_size = argv[2]
 
     #print("alloc_per_thread {} iteration_num {} instant_size {}".format(alloc_per_thread, iteration_num, instant_size))
     
